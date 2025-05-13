@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>OGTIS</title>
+</head>
+<body>
+    <h1>Добро пожаловать в OGTIS</h1>
+    <p>Введи свой ник, чтобы начать:</p>
+
+    <form id="entryForm">
+        <input type="text" id="nickname" placeholder="Твой ник" required />
+        <button type="submit">Отправить</button>
+    </form>
+
+    <div id="status"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
+        import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
+            authDomain: "ogtis-e2e4b.firebaseapp.com",
+            projectId: "ogtis-e2e4b",
+            storageBucket: "ogtis-e2e4b.firebasestorage.app",
+            messagingSenderId: "8188688236",
+            appId: "1:8188688236:web:ca6e4cf0e707a4ac9e6549",
+            databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app" // Добавлено вручную!
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        const form = document.getElementById("entryForm");
+        const status = document.getElementById("status");
+
+        form.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const nickname = document.getElementById("nickname").value;
+            const userAgent = navigator.userAgent;
+            const timestamp = Date.now(); // временная метка как ID
+
+            set(ref(db, 'users/' + timestamp), {
+                nickname: nickname,
+                userAgent: userAgent
+            }).then(() => {
+                status.textContent = "Отправлено!";
+                form.reset();
+            }).catch((error) => {
+                status.textContent = "Ошибка: " + error.message;
+            });
+        });
+    </script>
+</body>
+</html>
