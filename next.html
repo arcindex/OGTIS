@@ -1,88 +1,85 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <title>MOUv2.4 Boot</title>
+    <meta charset="UTF-8" />
+    <title>Загрузка памяти...</title>
     <style>
         body {
             background-color: #000;
             color: #00ffcc;
             font-family: monospace;
-            padding: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
         }
 
-        .terminal-line {
-            margin-bottom: 1em;
+        #text-box {
+            max-width: 600px;
+            font-size: 1.2em;
+            line-height: 1.5em;
+            white-space: pre-line;
         }
 
-        input {
-            background-color: #111;
-            color: #00ffcc;
-            border: none;
-            padding: 8px;
-            font-family: monospace;
-            width: 300px;
+        .blinking {
+            animation: blink 1s step-start infinite;
         }
 
-        button {
-            background-color: #00ffcc;
-            color: #000;
-            border: none;
-            padding: 8px 12px;
-            margin-top: 10px;
-            cursor: pointer;
-            font-weight: bold;
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
         }
     </style>
 </head>
-<script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-    import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
-
-    const firebaseConfig = {
-        apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
-        authDomain: "ogtis-e2e4b.firebaseapp.com",
-        projectId: "ogtis-e2e4b",
-        storageBucket: "ogtis-e2e4b.appspot.com",
-        messagingSenderId: "8188688236",
-        appId: "1:8188688236:web:ca6e4cf0e707a4ac9e6549",
-        databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-
-    window.saveUser = function (nickname) {
-        const timestamp = Date.now();
-        const userRef = ref(db, 'users/' + timestamp);
-        set(userRef, {
-            nickname: nickname,
-            userAgent: navigator.userAgent
-        });
-    }
-</script>
 <body>
-    <div class="terminal-line">==MOUv2.4==</div>
-    <div class="terminal-line">User: not found</div>
-    <div class="terminal-line">Not user: Others</div>
-    <div class="terminal-line">Not Aloxi: Not Aloxi</div>
-
-    <div class="terminal-line">Пожалуйста, введите имя, то имя, под которым вас видят люди:</div>
-
-    <input type="text" id="nickname" placeholder="например: Cookie" />
-    <br>
-    <button onclick="submitNickname()">Продолить</button>
+    <div id="text-box"></div>
 
     <script>
-        function submitNickname() {
-            const nickname = document.getElementById('nickname').value.trim();
-            if (!nickname) return alert("Введите ник!");
+        // Получаем имя из URL
+        const params = new URLSearchParams(window.location.search);
+        const userName = params.get("nickname") || "друг";
 
-            // Сохраняем в Firebase
-            saveUser(nickname);
+        const phrases = [
+            `${userName}.. да..? Звучит знакомо...`,
+            "Кто ты?.. Кофе.. не помогает...",
+            "Вспомним вместе, кто ты..",
+            "Вы вспомните вместе чем вы являетесь"
+        ];
 
-            // И переходим дальше
-            window.location.href = `next.html?nickname=${encodeURIComponent(nickname)}`;
+        const textBox = document.getElementById("text-box");
+        let index = 0;
+
+        function showNextPhrase() {
+            if (index >= phrases.length) {
+                setTimeout(() => {
+                    // Переход к следующей сцене, если нужно
+                    // window.location.href = "scene1.html?nickname=" + encodeURIComponent(userName);
+                }, 1000);
+                return;
+            }
+
+            textBox.innerHTML = "";
+            const phrase = phrases[index];
+            let charIndex = 0;
+
+            const typing = setInterval(() => {
+                textBox.innerHTML = phrase.slice(0, charIndex + 1) + "<span class='blinking'>▌</span>";
+                charIndex++;
+                if (charIndex >= phrase.length) {
+                    clearInterval(typing);
+                    textBox.innerHTML = phrase;
+                    setTimeout(() => {
+                        index++;
+                        showNextPhrase();
+                    }, 1500);
+                }
+            }, 40);
         }
+
+        showNextPhrase();
     </script>
 </body>
 </html>
