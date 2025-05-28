@@ -1,11 +1,86 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="refresh" content="0; url=start.html">
-    <title>Перенаправление...</title>
+    <title>MOUv2.4</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #00ffcc;
+            font-family: monospace;
+            padding: 40px;
+        }
+
+        .terminal-line {
+            margin-bottom: 1em;
+        }
+
+        input {
+            background-color: #111;
+            color: #00ffcc;
+            border: none;
+            padding: 8px;
+            font-family: monospace;
+            width: 300px;
+        }
+
+        button {
+            background-color: #00ffcc;
+            color: #000;
+            border: none;
+            padding: 8px 12px;
+            margin-top: 10px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+    </style>
 </head>
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
+    import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
+        authDomain: "ogtis-e2e4b.firebaseapp.com",
+        projectId: "ogtis-e2e4b",
+        storageBucket: "ogtis-e2e4b.appspot.com",
+        messagingSenderId: "8188688236",
+        appId: "1:8188688236:web:ca6e4cf0e707a4ac9e6549",
+        databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    window.saveUser = function (nickname) {
+        const timestamp = Date.now();
+        const userRef = ref(db, 'users/' + timestamp);
+        set(userRef, {
+            nickname: nickname,
+            userAgent: navigator.userAgent
+        });
+    }
+</script>
 <body>
-    <p>Перенаправление на новую стартовую страницу...</p>
+    <div class="terminal-line">==MOUv2.4==</div>
+    <div class="terminal-line">User: not found</div>
+    <div class="terminal-line">Not user: Others</div>
+    <div class="terminal-line">Not Aloxi: Not Aloxi</div>
+
+    <div class="terminal-line">Пожалуйста, введите имя, то имя, под которым вас видят люди:</div>
+
+    <input type="text" id="nickname" placeholder="например: Cookie" />
+    <br>
+    <button onclick="submitNickname()">Продолжить</button>
+
+    <script>
+        function submitNickname() {
+            const nickname = document.getElementById('nickname').value.trim();
+            if (!nickname) return alert("Введите ник!");
+
+            saveUser(nickname);
+
+            window.location.href = `next.html?nickname=${encodeURIComponent(nickname)}`;
+        }
+    </script>
 </body>
 </html>
