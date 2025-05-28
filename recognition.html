@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <title>Связь установлена...?</title>
+    <meta charset="UTF-8">
+    <title>Объединение</title>
     <style>
         body {
             background-color: #000;
@@ -19,43 +20,40 @@
             color: #000;
             border: none;
             padding: 8px 12px;
-            margin: 10px 5px 0 0;
+            margin-top: 10px;
             cursor: pointer;
             font-weight: bold;
         }
 
-        #user-list {
-            margin-top: 1em;
-        }
-
-        #ready-message {
-            margin-top: 1em;
-            color: #fff;
+        .hidden {
+            display: none;
         }
     </style>
 </head>
 <body>
-    <div class="terminal-line" id="text-output"></div>
-    <div id="user-list"></div>
-    <div id="question">
+    <div id="dialogue"></div>
+    <div id="user-list" class="hidden"></div>
+    <div id="question" class="hidden">
         <p>Ты узнаёшь их?</p>
-        <button onclick="selectYes()">Да</button>
-        <button onclick="selectNo()">Нет</button>
+        <button onclick="answer(true)">Да</button>
+        <button onclick="answer(false)">Нет</button>
     </div>
-    <div class="terminal-line" id="response"></div>
-    <div id="final-section" style="display:none">
-        <p>Тем не менее, вас всех что-то объединяет...</p>
-        <p>Ух... не пейте кофе...</p>
-        <p>Я пройдусь по каждому из вас</p>
-        <p>Вы вместе пройдётесь по всему пути</p>
-        <p>Выявим вместе... кто вы.</p>
+    <div id="post-question" class="hidden">
+        <p id="answer-text"></p>
+        <div class="terminal-line">Тем не менее вас всех что-то объединяет...</div>
+        <div class="terminal-line">Ух... не пейте кофе...</div>
+        <div class="terminal-line">Я пройдусь по каждому из вас</div>
+        <div class="terminal-line">Вы вместе пройдётесь по всему пути</div>
+        <div class="terminal-line">Выявим вместе... кто вы</div>
         <button onclick="markReady()">Продолжить</button>
-        <div id="ready-message"></div>
+    </div>
+    <div id="waiting" class="hidden">
+        <p>Ожидание остальных участников...</p>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, push, get, child } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, child } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -69,87 +67,51 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
+        const nickname = new URLSearchParams(window.location.search).get("nickname") || "???";
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const nickname = urlParams.get('nickname') || "[имя]";
+        const dialogueElement = document.getElementById("dialogue");
+        const userListElement = document.getElementById("user-list");
+        const questionElement = document.getElementById("question");
+        const postQuestionElement = document.getElementById("post-question");
+        const waitingElement = document.getElementById("waiting");
 
-        const textLines = [
-            `${nickname}... да..? Звучит знакомо...`,
-            "Кто ты?.. Кофе... не помогает...",
-            "Вспомним вместе, кто ты...",
-            "Вы вспомните вместе, чем вы являетесь...",
-            "Помимо тебя, ${nickname}, кто-то ещё зашёл сюда:",
-        ];
-
-        let currentLine = 0;
-        const textOutput = document.getElementById("text-output");
-
-        function showNextLine() {
-            if (currentLine < textLines.length) {
-                textOutput.innerHTML += `<div class='terminal-line'>${textLines[currentLine]}</div>`;
-                currentLine++;
-                setTimeout(showNextLine, 1500);
-            } else {
-                loadUsers();
-            }
-        }
-
-        function loadUsers() {
-            const userList = document.getElementById("user-list");
-            const usersRef = ref(db, 'users');
-            onValue(usersRef, (snapshot) => {
+        const usersRef = ref(db, 'users');
+        get(usersRef).then(snapshot => {
+            if (snapshot.exists()) {
                 const users = snapshot.val();
-                userList.innerHTML = '<ul>' + Object.values(users).map(user => `<li>${user.nickname}</li>`).join('') + '</ul>';
-            });
+                const names = Object.values(users).map(u => u.nickname).filter(n => n !== nickname);
+                userListElement.innerHTML = `Помимо тебя, <strong>${nickname}</strong>, кто-то ещё зашёл сюда:` +
+                    `<ul>${names.map(n => `<li>${n}</li>`).join('')}</ul>`;
+                userListElement.classList.remove('hidden');
+                questionElement.classList.remove('hidden');
+            }
+        });
+
+        function answer(recognize) {
+            questionElement.classList.add('hidden');
+            postQuestionElement.classList.remove('hidden');
+            const answerText = recognize
+                ? "А я... тяжело... надо пройтись по каждому..."
+                : "Я тоже... мне нужно больше данных..";
+            document.getElementById("answer-text").innerText = answerText;
         }
 
-        window.selectYes = function () {
-            document.getElementById("response").innerText = "А я... тяжело... надо пройтись по каждому...";
-            document.getElementById("question").style.display = 'none';
-            document.getElementById("final-section").style.display = 'block';
-        }
+        function markReady() {
+            postQuestionElement.classList.add('hidden');
+            waitingElement.classList.remove('hidden');
 
-        window.selectNo = function () {
-            document.getElementById("response").innerText = "Я тоже... мне нужно больше данных...";
-            document.getElementById("question").style.display = 'none';
-            document.getElementById("final-section").style.display = 'block';
-        }
+            const userKeyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
+            set(userKeyRef, true);
 
-        function getUserId() {
-            return nickname.replace(/[^a-zA-Z0-9]/g, "_");
-        }
+            onValue(ref(db, 'ready'), snapshot => {
+                const totalUsers = document.querySelectorAll("#user-list li").length + 1;
+                const readyUsers = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
 
-        window.markReady = function () {
-            const readyRef = ref(db, `ready/${getUserId()}`);
-            set(readyRef, true);
-            document.getElementById("ready-message").innerText = "Ожидание других участников...";
-
-            checkAllReady();
-        }
-
-        function checkAllReady() {
-            const usersRef = ref(db, 'users');
-            const readyRef = ref(db, 'ready');
-
-            Promise.all([get(usersRef), get(readyRef)]).then(([usersSnap, readySnap]) => {
-                const users = usersSnap.val();
-                const ready = readySnap.val();
-
-                const total = Object.keys(users || {}).length;
-                const readyCount = Object.keys(ready || {}).length;
-
-                if (total > 0 && readyCount >= total) {
-                    document.getElementById("ready-message").innerText = "Все готовы. Переход...";
-                    setTimeout(() => {
-                        window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
-                    }, 2000);
-                } else {
-                    setTimeout(checkAllReady, 2000);
+                if (readyUsers >= totalUsers) {
+                    window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
                 }
             });
         }
-
-        showNextLine();
     </script>
 </body>
 </html>
