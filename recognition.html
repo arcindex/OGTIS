@@ -161,8 +161,10 @@
                     await addLineAnimated(userListElement, `    → ${name}`);
                 }
 
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                questionElement.classList.remove("hidden");
+                if (others.length >= 2) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    questionElement.classList.remove("hidden");
+                }
             } else {
                 await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
                 await addLineAnimated(userListElement, `Ожидаем других участников<span class="blinking">...</span>`);
