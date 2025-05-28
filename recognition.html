@@ -124,7 +124,6 @@
                     const lines = [
                         `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`,
                         ...others.map(name => `    ${name}`),
-                        "Ты узнаёшь их?"
                     ];
                     for (const line of lines) {
                         await addLineAnimated(line);
@@ -164,6 +163,9 @@
                 }
             });
         }
+
+        window.answer = answer;
+        window.markReady = markReady;
     </script>
 </body>
 </html>
