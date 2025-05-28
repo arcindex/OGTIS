@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Узнаешь?</title>
+    <title>Другие</title>
     <style>
         body {
             background-color: #000;
@@ -21,54 +21,76 @@
             color: #000;
             border: none;
             padding: 8px 12px;
-            margin-top: 10px;
+            margin: 10px 5px;
             cursor: pointer;
             font-weight: bold;
         }
 
-        #question.hidden {
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-        }
+            button:hover {
+                background-color: #00ccaa;
+            }
 
-        #question {
+        .section {
             opacity: 1;
             transition: opacity 0.3s ease;
         }
 
-        .hidden {
-            display: none;
+            .section.hidden {
+                opacity: 0;
+                pointer-events: none;
+                position: absolute;
+            }
+
+        .blinking {
+            animation: blink 1s step-start infinite;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+
+        #ready-status {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #00ffcc;
         }
     </style>
 </head>
 <body>
-    <div id="dialogue"></div>
-    <div id="user-list" class="hidden"></div>
+    <div id="user-list-section" class="section">
+        <div id="user-list"></div>
 
-    <div id="question" class="hidden">
-        <p>Ты узнаёшь их?</p>
-        <button onclick="answer(true)">Да</button>
-        <button onclick="answer(false)">Нет</button>
+        <div id="question" class="hidden">
+            <div class="terminal-line">Ты узнаёшь их?</div>
+            <button onclick="answer(true)">Да, конечно!</button>
+            <button onclick="answer(false)">Не всех...</button>
+        </div>
     </div>
 
-    <div id="post-question" class="hidden">
-        <p id="answer-text"></p>
+    <div id="post-question" class="section hidden">
+        <div class="terminal-line" id="answer-text"></div>
         <div class="terminal-line">Тем не менее вас всех что-то объединяет...</div>
-        <div class="terminal-line">Ух... не пейте кофе...</div>
-        <div class="terminal-line">Я пройдусь по каждому из вас</div>
-        <div class="terminal-line">Вы вместе пройдётесь по всему пути</div>
-        <div class="terminal-line">Выявим вместе... кто вы</div>
-        <button onclick="markReady()">Продолжить</button>
+        <div class="terminal-line">Ух... не пейте кофе... оно не поможет вспомнить...</div>
+        <div class="terminal-line">Я пройдусь по каждому из вас...</div>
+        <div class="terminal-line">Вы вместе пройдёте весь путь...</div>
+        <div class="terminal-line">Выявим вместе... кто вы...</div>
+        <button onclick="markReady()">Готов начать</button>
     </div>
 
-    <div id="waiting" class="hidden">
-        <p>Ожидание остальных участников...</p>
+    <div id="waiting" class="section hidden">
+        <div class="terminal-line">Инициализация системы восстановления памяти...</div>
+        <div class="terminal-line">Ожидание синхронизации с другими узлами<span class="blinking">...</span></div>
+        <div id="ready-status">
+            <div>Готовы к запуску: <span id="ready-count">0</span>/<span id="total-count">0</span></div>
+            <div id="ready-list"></div>
+        </div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -84,16 +106,24 @@
         const db = getDatabase(app);
         const nickname = new URLSearchParams(window.location.search).get("nickname") || "???";
 
-        const userListElement = document.getElementById("user-list");
-        const questionElement = document.getElementById("question");
-        const postQuestionElement = document.getElementById("post-question");
-        const waitingElement = document.getElementById("waiting");
+        let allUsers = [];
+        let isReady = false;
 
-        function addLineAnimated(html) {
+        async function checkExistingProgress() {
+            const readyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
+            const snapshot = await get(readyRef);
+            if (snapshot.exists()) {
+                showWaitingScreen();
+                return true;
+            }
+            return false;
+        }
+
+        function addLineAnimated(container, html) {
             return new Promise(resolve => {
                 const line = document.createElement("div");
                 line.className = "terminal-line";
-                userListElement.appendChild(line);
+                container.appendChild(line);
 
                 let i = 0;
                 const text = html;
@@ -109,60 +139,102 @@
             });
         }
 
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.add('hidden');
+            });
+            document.getElementById(sectionId).classList.remove('hidden');
+        }
+
+        async function displayUsers() {
+            const userListElement = document.getElementById("user-list");
+            const questionElement = document.getElementById("question");
+
+            userListElement.innerHTML = "";
+
+            const others = allUsers.filter(name => name !== nickname);
+
+            if (others.length > 0) {
+                await addLineAnimated(userListElement, `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`);
+
+                for (const name of others) {
+                    await addLineAnimated(userListElement, `    → ${name}`);
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                questionElement.classList.remove("hidden");
+            } else {
+                await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
+                await addLineAnimated(userListElement, `Ожидаем других участников<span class="blinking">...</span>`);
+            }
+        }
+
         const usersRef = ref(db, 'users');
         onValue(usersRef, async (snapshot) => {
             if (snapshot.exists()) {
                 const users = snapshot.val();
-                const others = Object.values(users)
-                    .map(user => user.nickname)
-                    .filter(name => name !== nickname);
+                allUsers = Object.values(users).map(user => user.nickname);
 
-                userListElement.innerHTML = "";
-                questionElement.classList.add("hidden");
-
-                if (others.length > 0) {
-                    const lines = [
-                        `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`,
-                        ...others.map(name => `    ${name}`),
-                    ];
-                    for (const line of lines) {
-                        await addLineAnimated(line);
-                    }
-                    questionElement.classList.remove("hidden");
+                if (!isReady) {
+                    await displayUsers();
                 } else {
-                    await addLineAnimated(`Ты пока здесь один, <strong>${nickname}</strong>...`);
-                    await addLineAnimated(`Ожидаем других участников...`);
+                    updateWaitingStatus();
                 }
-
-                userListElement.classList.remove("hidden");
             }
         });
 
         function answer(recognize) {
-            questionElement.classList.add('hidden');
-            postQuestionElement.classList.remove('hidden');
+            document.getElementById("question").classList.add('hidden');
+            showSection('post-question');
+
             const answerText = recognize
                 ? "А я... тяжело... надо пройтись по каждому..."
                 : "Я тоже... мне нужно больше данных...";
             document.getElementById("answer-text").innerText = answerText;
         }
 
-        function markReady() {
-            postQuestionElement.classList.add('hidden');
-            waitingElement.classList.remove('hidden');
+        function showWaitingScreen() {
+            isReady = true;
+            showSection('waiting');
+            updateWaitingStatus();
+        }
+
+        async function markReady() {
+            showWaitingScreen();
 
             const userKeyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
-            set(userKeyRef, true);
+            await set(userKeyRef, {
+                nickname: nickname,
+                timestamp: Date.now()
+            });
+        }
 
-            onValue(ref(db, 'ready'), snapshot => {
-                const totalUsers = document.querySelectorAll("#user-list li").length + 1;
-                const readyUsers = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+        function updateWaitingStatus() {
+            const readyRef = ref(db, 'ready');
+            onValue(readyRef, snapshot => {
+                const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
+                const readyCount = readyUsers.length;
+                const totalCount = allUsers.length;
 
-                if (readyUsers >= totalUsers) {
-                    window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
+                document.getElementById('ready-count').textContent = readyCount;
+                document.getElementById('total-count').textContent = totalCount;
+
+                const readyListElement = document.getElementById('ready-list');
+                readyListElement.innerHTML = readyUsers
+                    .map(user => `✓ ${user.nickname}`)
+                    .join('<br>');
+
+                if (readyCount >= Math.max(2, Math.floor(totalCount * 0.7))) {
+                    setTimeout(() => {
+                        window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
+                    }, 2000);
                 }
             });
         }
+
+        window.addEventListener('load', async () => {
+            await checkExistingProgress();
+        });
 
         window.answer = answer;
         window.markReady = markReady;
