@@ -54,7 +54,8 @@
         function showNextPhrase() {
             if (index >= phrases.length) {
                 setTimeout(() => {
-                    window.location.href = "recognition.html?nickname=" + encodeURIComponent(userName);
+                    // Переход к следующей сцене, если нужно
+                    // window.location.href = "scene1.html?nickname=" + encodeURIComponent(userName);
                 }, 1000);
                 return;
             }

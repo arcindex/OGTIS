@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Связь установлена...?</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #00ffcc;
+            font-family: monospace;
+            padding: 40px;
+        }
+
+        .terminal-line {
+            margin-bottom: 1em;
+        }
+
+        button {
+            background-color: #00ffcc;
+            color: #000;
+            border: none;
+            padding: 8px 12px;
+            margin: 10px 5px 0 0;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        #user-list {
+            margin-top: 1em;
+        }
+
+        #ready-message {
+            margin-top: 1em;
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal-line" id="text-output"></div>
+    <div id="user-list"></div>
+    <div id="question">
+        <p>Ты узнаёшь их?</p>
+        <button onclick="selectYes()">Да</button>
+        <button onclick="selectNo()">Нет</button>
+    </div>
+    <div class="terminal-line" id="response"></div>
+    <div id="final-section" style="display:none">
+        <p>Тем не менее, вас всех что-то объединяет...</p>
+        <p>Ух... не пейте кофе...</p>
+        <p>Я пройдусь по каждому из вас</p>
+        <p>Вы вместе пройдётесь по всему пути</p>
+        <p>Выявим вместе... кто вы.</p>
+        <button onclick="markReady()">Продолжить</button>
+        <div id="ready-message"></div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
+        import { getDatabase, ref, onValue, set, push, get, child } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
+            authDomain: "ogtis-e2e4b.firebaseapp.com",
+            projectId: "ogtis-e2e4b",
+            storageBucket: "ogtis-e2e4b.appspot.com",
+            messagingSenderId: "8188688236",
+            appId: "1:8188688236:web:ca6e4cf0e707a4ac9e6549",
+            databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const nickname = urlParams.get('nickname') || "[имя]";
+
+        const textLines = [
+            `${nickname}... да..? Звучит знакомо...`,
+            "Кто ты?.. Кофе... не помогает...",
+            "Вспомним вместе, кто ты...",
+            "Вы вспомните вместе, чем вы являетесь...",
+            "Помимо тебя, ${nickname}, кто-то ещё зашёл сюда:",
+        ];
+
+        let currentLine = 0;
+        const textOutput = document.getElementById("text-output");
+
+        function showNextLine() {
+            if (currentLine < textLines.length) {
+                textOutput.innerHTML += `<div class='terminal-line'>${textLines[currentLine]}</div>`;
+                currentLine++;
+                setTimeout(showNextLine, 1500);
+            } else {
+                loadUsers();
+            }
+        }
+
+        function loadUsers() {
+            const userList = document.getElementById("user-list");
+            const usersRef = ref(db, 'users');
+            onValue(usersRef, (snapshot) => {
+                const users = snapshot.val();
+                userList.innerHTML = '<ul>' + Object.values(users).map(user => `<li>${user.nickname}</li>`).join('') + '</ul>';
+            });
+        }
+
+        window.selectYes = function () {
+            document.getElementById("response").innerText = "А я... тяжело... надо пройтись по каждому...";
+            document.getElementById("question").style.display = 'none';
+            document.getElementById("final-section").style.display = 'block';
+        }
+
+        window.selectNo = function () {
+            document.getElementById("response").innerText = "Я тоже... мне нужно больше данных...";
+            document.getElementById("question").style.display = 'none';
+            document.getElementById("final-section").style.display = 'block';
+        }
+
+        function getUserId() {
+            return nickname.replace(/[^a-zA-Z0-9]/g, "_");
+        }
+
+        window.markReady = function () {
+            const readyRef = ref(db, `ready/${getUserId()}`);
+            set(readyRef, true);
+            document.getElementById("ready-message").innerText = "Ожидание других участников...";
+
+            checkAllReady();
+        }
+
+        function checkAllReady() {
+            const usersRef = ref(db, 'users');
+            const readyRef = ref(db, 'ready');
+
+            Promise.all([get(usersRef), get(readyRef)]).then(([usersSnap, readySnap]) => {
+                const users = usersSnap.val();
+                const ready = readySnap.val();
+
+                const total = Object.keys(users || {}).length;
+                const readyCount = Object.keys(ready || {}).length;
+
+                if (total > 0 && readyCount >= total) {
+                    document.getElementById("ready-message").innerText = "Все готовы. Переход...";
+                    setTimeout(() => {
+                        window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
+                    }, 2000);
+                } else {
+                    setTimeout(checkAllReady, 2000);
+                }
+            });
+        }
+
+        showNextLine();
+    </script>
+</body>
+</html>
