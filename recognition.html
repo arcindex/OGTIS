@@ -91,8 +91,8 @@
                 if (others.length > 0) {
                     const introLine = document.createElement("div");
                     introLine.className = "terminal-line";
-                    introLine.textContent = `${nickname}, смотри, кто-то ещё зашёл:`;
-                    list.appendChild(introLine);
+                    introLine.innerHTML = `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`;
+                    userListElement.appendChild(introLine);
 
                     others.forEach(name => {
                         const li = document.createElement("div");
@@ -112,6 +112,7 @@
                     list.appendChild(waitLine);
                     list.appendChild(introLine);
                     userListElement.classList.remove("hidden");
+                    questionElement.classList.remove("hidden");
                 }
 
                 userListElement.classList.remove("hidden");
@@ -144,6 +145,9 @@
                 }
             });
         }
+
+        window.answer = answer;
+        window.markReady = markReady;
     </script>
 </body>
 </html>
