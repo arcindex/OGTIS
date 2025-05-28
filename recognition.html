@@ -82,11 +82,37 @@
                 const list = userListElement;
                 list.innerHTML = "";
 
-                Object.values(users).forEach(user => {
-                    const li = document.createElement("li");
-                    li.textContent = user.nickname;
-                    list.appendChild(li);
-                });
+                const others = Object.values(users)
+                    .map(user => user.nickname)
+                    .filter(name => name !== nickname);
+
+                list.innerHTML = "";
+
+                if (others.length > 0) {
+                    const introLine = document.createElement("div");
+                    introLine.className = "terminal-line";
+                    introLine.textContent = `${nickname}, смотри, кто-то ещё зашёл:`;
+                    list.appendChild(introLine);
+
+                    others.forEach(name => {
+                        const li = document.createElement("div");
+                        li.textContent = name;
+                        list.appendChild(li);
+                    });
+
+                    userListElement.classList.remove("hidden");
+                    questionElement.classList.remove("hidden");
+                } else {
+                    const introLine = document.createElement("div");
+                    introLine.className = "terminal-line";
+                    introLine.textContent = `Ты пока здесь один, ${nickname}...`;
+                    const waitLine = document.createElement("div");
+                    waitLine.className = "terminal-line";
+                    waitLine.textContent = `Кто-то заходит...`;
+                    list.appendChild(waitLine);
+                    list.appendChild(introLine);
+                    userListElement.classList.remove("hidden");
+                }
 
                 userListElement.classList.remove("hidden");
                 questionElement.classList.remove("hidden");
