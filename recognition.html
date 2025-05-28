@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Объединение</title>
+    <title>Узнаешь?</title>
     <style>
         body {
             background-color: #000;
@@ -76,14 +76,17 @@
         const waitingElement = document.getElementById("waiting");
 
         const usersRef = ref(db, 'users');
-        get(usersRef).then(snapshot => {
+        onValue(usersRef, (snapshot) => {
             if (snapshot.exists()) {
                 const users = snapshot.val();
-                const names = Object.values(users).map(u => u.nickname).filter(n => n !== nickname);
-                userListElement.innerHTML = `Помимо тебя, <strong>${nickname}</strong>, кто-то ещё зашёл сюда:` +
-                    `<ul>${names.map(n => `<li>${n}</li>`).join('')}</ul>`;
-                userListElement.classList.remove('hidden');
-                questionElement.classList.remove('hidden');
+                const list = document.getElementById("users-list");
+                list.innerHTML = "";
+
+                Object.values(users).forEach(user => {
+                    const li = document.createElement("li");
+                    li.textContent = user.nickname;
+                    list.appendChild(li);
+                });
             }
         });
 
