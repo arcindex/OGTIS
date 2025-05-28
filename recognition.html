@@ -167,7 +167,7 @@
                 }
             } else {
                 await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
-                await addLineAnimated(userListElement, `Ожидаем других участников<span class="blinking">...</span>`);
+                await addLineAnimated(userListElement, `Мне нужно.. больше данных<span class="blinking">...</span>`);
             }
         }
 
@@ -191,7 +191,7 @@
 
             const answerText = recognize
                 ? "А я... тяжело... надо пройтись по каждому..."
-                : "Я тоже... мне нужно больше данных...";
+                : "Я тоже... нужно больше информации...";
             document.getElementById("answer-text").innerText = answerText;
         }
 
