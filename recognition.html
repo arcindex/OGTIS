@@ -32,7 +32,7 @@
 </head>
 <body>
     <div id="dialogue"></div>
-    <div id="user-list" class="hidden"></div>
+    <ul id="user-list" class="hidden"></ul>
     <div id="question" class="hidden">
         <p>Ты узнаёшь их?</p>
         <button onclick="answer(true)">Да</button>
@@ -79,7 +79,7 @@
         onValue(usersRef, (snapshot) => {
             if (snapshot.exists()) {
                 const users = snapshot.val();
-                const list = document.getElementById("users-list");
+                const list = userListElement;
                 list.innerHTML = "";
 
                 Object.values(users).forEach(user => {
@@ -87,6 +87,9 @@
                     li.textContent = user.nickname;
                     list.appendChild(li);
                 });
+
+                userListElement.classList.remove("hidden");
+                questionElement.classList.remove("hidden");
             }
         });
 
