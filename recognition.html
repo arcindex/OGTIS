@@ -139,16 +139,27 @@
         nickname = new URLSearchParams(window.location.search).get("nickname") || "???";
 
         async function registerUser() {
+            // НЕ регистрируем пользователя повторно - он уже зарегистрирован в index.html
+            // Просто обновляем статус что он онлайн на этой странице
             try {
-                const userRef = ref(db, 'users/' + encodeURIComponent(nickname));
-                await set(userRef, {
-                    nickname: nickname,
-                    timestamp: Date.now(),
-                    online: true
-                });
+                const usersSnapshot = await get(ref(db, 'users'));
+                if (usersSnapshot.exists()) {
+                    const users = usersSnapshot.val();
+                    // Находим пользователя по nickname и обновляем его статус
+                    for (const [key, user] of Object.entries(users)) {
+                        if (user.nickname === nickname) {
+                            const userRef = ref(db, 'users/' + key);
+                            await set(userRef, {
+                                ...user,
+                                onRecognitionPage: true,
+                                lastActivity: Date.now()
+                            });
+                            break;
+                        }
+                    }
+                }
             } catch (error) {
-                console.error('Ошибка регистрации пользователя:', error);
-                showError();
+                console.error('Ошибка обновления статуса пользователя:', error);
             }
         }
 
@@ -221,8 +232,9 @@
                     await addLineAnimated(userListElement, `    → ${name}`);
                 }
 
-                // Показываем вопрос только если других участников >= 2
-                if (others.length >= 2) {
+                // Показываем вопрос только если ОБЩЕЕ количество участников >= 3 (то есть кроме меня еще >= 2)
+                const totalUsers = others.length + 1; // +1 это сам текущий пользователь
+                if (totalUsers >= 3) {
                     await new Promise(resolve => setTimeout(resolve, 1500));
                     questionElement.classList.remove("hidden");
                 }
@@ -321,7 +333,7 @@
         // Инициализация при загрузке страницы
         window.addEventListener('load', async () => {
             try {
-                // Сначала регистрируем пользователя
+                // Обновляем статус пользователя (без дублирования)
                 await registerUser();
 
                 // Затем проверяем существующий прогресс

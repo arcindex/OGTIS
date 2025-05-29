@@ -1,8 +1,7 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Другие</title>
+    <title>MOUv2.4</title>
     <style>
         body {
             background-color: #000;
@@ -13,7 +12,15 @@
 
         .terminal-line {
             margin-bottom: 1em;
-            white-space: pre-wrap;
+        }
+
+        input {
+            background-color: #111;
+            color: #00ffcc;
+            border: none;
+            padding: 8px;
+            font-family: monospace;
+            width: 300px;
         }
 
         button {
@@ -21,98 +28,27 @@
             color: #000;
             border: none;
             padding: 8px 12px;
-            margin: 10px 5px;
+            margin-top: 10px;
             cursor: pointer;
             font-weight: bold;
-            border-radius: 3px;
-        }
-
-            button:hover {
-                background-color: #00ccaa;
-            }
-
-        .section {
-            opacity: 1;
-            transition: opacity 0.3s ease;
-        }
-
-            .section.hidden {
-                opacity: 0;
-                pointer-events: none;
-                position: absolute;
-            }
-
-        .blinking {
-            animation: blink 1s step-start infinite;
-        }
-
-        @keyframes blink {
-            50% {
-                opacity: 0;
-            }
-        }
-
-        #ready-status {
-            margin-top: 20px;
-            padding: 10px;
-            border: 1px solid #00ffcc;
-            border-radius: 5px;
-        }
-
-        .error-message {
-            color: #ff6666;
-            border: 1px solid #ff6666;
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
-        }
-
-        .loading {
-            color: #ffcc00;
         }
     </style>
 </head>
 <body>
-    <div id="user-list-section" class="section">
-        <div id="user-list"></div>
+    <div class="terminal-line">==MOUv2.4==</div>
+    <div class="terminal-line">User: not found</div>
+    <div class="terminal-line">Not user: Others</div>
+    <div class="terminal-line">Not Aloxi: Not Aloxi</div>
 
-        <div id="question" class="hidden">
-            <div class="terminal-line">Ты узнаёшь их?</div>
-            <button onclick="answer(true)">Да!</button>
-            <button onclick="answer(false)">Нет</button>
-        </div>
-    </div>
+    <div class="terminal-line">Пожалуйста, введите имя, то имя, под которым вас видят люди:</div>
 
-    <div id="post-question" class="section hidden">
-        <div class="terminal-line" id="answer-text"></div>
-        <div class="terminal-line">Тем не менее вас всех что-то объединяет...</div>
-        <div class="terminal-line">Ух... не пейте кофе... оно не поможет вспомнить...</div>
-        <div class="terminal-line">Я пройдусь по каждому из вас...</div>
-        <div class="terminal-line">Вы вместе пройдёте весь путь...</div>
-        <div class="terminal-line">Выявим вместе... кто вы...</div>
-        <button onclick="markReady()">Готов начать</button>
-    </div>
-
-    <div id="waiting" class="section hidden">
-        <div class="terminal-line">Инициализация системы восстановления памяти...</div>
-        <div class="terminal-line">Ожидание синхронизации с другими узлами<span class="blinking">...</span></div>
-        <div id="ready-status">
-            <div>Готовы к запуску: <span id="ready-count">0</span>/<span id="total-count">0</span></div>
-            <div id="ready-list"></div>
-        </div>
-    </div>
-
-    <div id="error-section" class="section hidden">
-        <div class="error-message">
-            <div class="terminal-line">Ошибка подключения к системе...</div>
-            <div class="terminal-line">Проверьте подключение к сети и обновите страницу</div>
-            <button onclick="location.reload()">Попробовать снова</button>
-        </div>
-    </div>
+    <input type="text" id="nickname" placeholder="например: Cookie" />
+    <br>
+    <button id="continueBtn">Продолжить</button>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -124,241 +60,26 @@
             databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
         };
 
-        let app, db;
-        let nickname;
-        let allUsers = [];
-        let isReady = false;
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
 
-        // Получаем DOM элементы
-        const userListElement = document.getElementById('user-list');
-        const questionElement = document.getElementById('question');
+        document.getElementById("continueBtn").addEventListener("click", () => {
+            const nickname = document.getElementById('nickname').value.trim();
+            if (!nickname) return alert("Введите ник!");
 
-        // Инициализация Firebase
-        app = initializeApp(firebaseConfig);
-        db = getDatabase(app);
-        nickname = new URLSearchParams(window.location.search).get("nickname") || "???";
-
-        async function registerUser() {
-            // НЕ регистрируем пользователя повторно - он уже зарегистрирован в index.html
-            // Просто обновляем статус что он онлайн на этой странице
-            try {
-                const usersSnapshot = await get(ref(db, 'users'));
-                if (usersSnapshot.exists()) {
-                    const users = usersSnapshot.val();
-                    // Находим пользователя по nickname и обновляем его статус
-                    for (const [key, user] of Object.entries(users)) {
-                        if (user.nickname === nickname) {
-                            const userRef = ref(db, 'users/' + key);
-                            await set(userRef, {
-                                ...user,
-                                onRecognitionPage: true,
-                                lastActivity: Date.now()
-                            });
-                            break;
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Ошибка обновления статуса пользователя:', error);
-            }
-        }
-
-        async function checkExistingProgress() {
-            try {
-                const readyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
-                const snapshot = await get(readyRef);
-                if (snapshot.exists()) {
-                    showWaitingScreen();
-                    return true;
-                }
-                return false;
-            } catch (error) {
-                console.error('Ошибка проверки прогресса:', error);
-                return false;
-            }
-        }
-
-        function addLineAnimated(container, html) {
-            return new Promise(resolve => {
-                const line = document.createElement("div");
-                line.className = "terminal-line";
-                container.appendChild(line);
-
-                let i = 0;
-                const text = html;
-                const interval = setInterval(() => {
-                    line.innerHTML = text.slice(0, i) + (i < text.length && i % 2 === 0 ? "_" : "");
-                    i++;
-                    if (i > text.length + 2) {
-                        clearInterval(interval);
-                        line.innerHTML = text;
-                        resolve();
-                    }
-                }, 50);
+            const timestamp = Date.now();
+            const userRef = ref(db, 'users/' + timestamp);
+            set(userRef, {
+                nickname: nickname,
+                userAgent: navigator.userAgent,
+                ready: false
+            }).then(() => {
+                window.location.href = `intro.html?nickname=${encodeURIComponent(nickname)}`;
+            }).catch((error) => {
+                console.error("Ошибка при сохранении:", error);
+                alert("Ошибка при сохранении данных. Проверь подключение или консоль.");
             });
-        }
-
-        function showSection(sectionId) {
-            document.querySelectorAll('.section').forEach(section => {
-                section.classList.add('hidden');
-            });
-            const targetSection = document.getElementById(sectionId);
-            if (targetSection) {
-                targetSection.classList.remove('hidden');
-            }
-        }
-
-        function showError() {
-            showSection('error-section');
-        }
-
-        async function displayUsers(users) {
-            if (!users) return;
-
-            const others = Object.values(users)
-                .map(user => user.nickname)
-                .filter(name => name !== nickname);
-
-            userListElement.innerHTML = "";
-            questionElement.classList.add("hidden");
-
-            if (others.length === 0) {
-                await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
-                await addLineAnimated(userListElement, `Ожидаем других участников<span class="blinking">...</span>`);
-            } else {
-                await addLineAnimated(userListElement, `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`);
-
-                for (const name of others) {
-                    await addLineAnimated(userListElement, `    → ${name}`);
-                }
-
-                // Показываем вопрос только если ОБЩЕЕ количество участников >= 3 (то есть кроме меня еще >= 2)
-                const totalUsers = others.length + 1; // +1 это сам текущий пользователь
-                if (totalUsers >= 3) {
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                    questionElement.classList.remove("hidden");
-                }
-            }
-        }
-
-        // Слушаем изменения пользователей
-        const usersRef = ref(db, 'users');
-        onValue(usersRef, async (snapshot) => {
-            try {
-                if (snapshot.exists()) {
-                    const users = snapshot.val();
-                    allUsers = Object.values(users).map(user => user.nickname);
-
-                    if (!isReady) {
-                        await displayUsers(users);
-                    } else {
-                        updateWaitingStatus();
-                    }
-                }
-            } catch (error) {
-                console.error('Ошибка обработки пользователей:', error);
-            }
-        }, (error) => {
-            console.error('Ошибка подключения к базе данных:', error);
-            showError();
         });
-
-        function answer(recognize) {
-            questionElement.classList.add('hidden');
-            showSection('post-question');
-
-            const answerText = recognize
-                ? "А я... тяжело... надо пройтись по каждому..."
-                : "Я тоже... нужно больше информации...";
-            document.getElementById("answer-text").innerText = answerText;
-        }
-
-        function showWaitingScreen() {
-            isReady = true;
-            showSection('waiting');
-            updateWaitingStatus();
-        }
-
-        async function markReady() {
-            try {
-                showWaitingScreen();
-
-                const userKeyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
-                await set(userKeyRef, {
-                    nickname: nickname,
-                    timestamp: Date.now()
-                });
-            } catch (error) {
-                console.error('Ошибка отметки готовности:', error);
-                showError();
-            }
-        }
-
-        function updateWaitingStatus() {
-            const readyRef = ref(db, 'ready');
-            onValue(readyRef, snapshot => {
-                try {
-                    const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
-                    const readyCount = readyUsers.length;
-                    const totalCount = Math.max(allUsers.length, 1);
-
-                    document.getElementById('ready-count').textContent = readyCount;
-                    document.getElementById('total-count').textContent = totalCount;
-
-                    const readyListElement = document.getElementById('ready-list');
-                    readyListElement.innerHTML = readyUsers
-                        .map(user => `✓ ${user.nickname}`)
-                        .join('<br>');
-
-                    // Переход к следующему этапу когда готово минимум 2 человека или 70% от общего числа
-                    const minReady = Math.max(2, Math.floor(totalCount * 0.7));
-                    if (readyCount >= minReady && totalCount >= 2) {
-                        setTimeout(() => {
-                            // Можно заменить на актуальный URL следующего этапа
-                            const nextStageUrl = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
-                            console.log('Переход к следующему этапу:', nextStageUrl);
-                            // window.location.href = nextStageUrl;
-
-                            // Временно показываем сообщение вместо перехода
-                            document.querySelector('#waiting .terminal-line').innerHTML =
-                                'Все готовы! Переход к следующему этапу... <br><em style="color: #ffcc00;">(Файл stage1.html не найден)</em>';
-                        }, 2000);
-                    }
-                } catch (error) {
-                    console.error('Ошибка обновления статуса:', error);
-                }
-            });
-        }
-
-        // Инициализация при загрузке страницы
-        window.addEventListener('load', async () => {
-            try {
-                // Обновляем статус пользователя (без дублирования)
-                await registerUser();
-
-                // Затем проверяем существующий прогресс
-                await checkExistingProgress();
-            } catch (error) {
-                console.error('Ошибка при загрузке:', error);
-                showError();
-            }
-        });
-
-        // Обработка закрытия страницы
-        window.addEventListener('beforeunload', async () => {
-            try {
-                if (db && nickname) {
-                    const userRef = ref(db, 'users/' + encodeURIComponent(nickname));
-                    await set(userRef, null);
-                }
-            } catch (error) {
-                console.error('Ошибка при выходе:', error);
-            }
-        });
-
-        // Глобальные функции для кнопок
-        window.answer = answer;
-        window.markReady = markReady;
     </script>
 </body>
 </html>
