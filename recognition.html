@@ -112,7 +112,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, remove } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -139,28 +139,9 @@
         nickname = new URLSearchParams(window.location.search).get("nickname") || "???";
 
         async function registerUser() {
-            // НЕ регистрируем пользователя повторно - он уже зарегистрирован в index.html
-            // Просто обновляем статус что он онлайн на этой странице
-            try {
-                const usersSnapshot = await get(ref(db, 'users'));
-                if (usersSnapshot.exists()) {
-                    const users = usersSnapshot.val();
-                    // Находим пользователя по nickname и обновляем его статус
-                    for (const [key, user] of Object.entries(users)) {
-                        if (user.nickname === nickname) {
-                            const userRef = ref(db, 'users/' + key);
-                            await set(userRef, {
-                                ...user,
-                                onRecognitionPage: true,
-                                lastActivity: Date.now()
-                            });
-                            break;
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Ошибка обновления статуса пользователя:', error);
-            }
+            // ВООБЩЕ НЕ регистрируем пользователя - он уже есть в базе из index.html
+            // Эта функция теperь пустая, чтобы не создавать дубликатов
+            console.log('Пользователь уже зарегистрирован в index.html:', nickname);
         }
 
         async function checkExistingProgress() {
@@ -215,12 +196,19 @@
         async function displayUsers(users) {
             if (!users) return;
 
-            const others = Object.values(users)
-                .map(user => user.nickname)
-                .filter(name => name !== nickname);
+            // Получаем уникальные никнеймы (без дубликатов)
+            const allNicknames = Object.values(users).map(user => user.nickname);
+            const uniqueNicknames = [...new Set(allNicknames)]; // убираем дубликаты
+
+            const others = uniqueNicknames.filter(name => name !== nickname);
 
             userListElement.innerHTML = "";
             questionElement.classList.add("hidden");
+
+            console.log('Всего уникальных участников:', uniqueNicknames.length);
+            console.log('Других участников (кроме меня):', others.length);
+            console.log('Мой никнейм:', nickname);
+            console.log('Другие:', others);
 
             if (others.length === 0) {
                 await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
@@ -232,11 +220,14 @@
                     await addLineAnimated(userListElement, `    → ${name}`);
                 }
 
-                // Показываем вопрос только если ОБЩЕЕ количество участников >= 3 (то есть кроме меня еще >= 2)
-                const totalUsers = others.length + 1; // +1 это сам текущий пользователь
-                if (totalUsers >= 3) {
+                // Показываем вопрос только если других участников >= 2 (то есть всего >= 3)
+                console.log('Проверяем: others.length =', others.length, 'нужно >= 2');
+                if (others.length >= 2) {
+                    console.log('Показываем вопрос!');
                     await new Promise(resolve => setTimeout(resolve, 1500));
                     questionElement.classList.remove("hidden");
+                } else {
+                    console.log('Вопрос не показываем, недостаточно участников');
                 }
             }
         }
@@ -333,10 +324,12 @@
         // Инициализация при загрузке страницы
         window.addEventListener('load', async () => {
             try {
-                // Обновляем статус пользователя (без дублирования)
-                await registerUser();
+                console.log('Загрузка страницы, nickname:', nickname);
 
-                // Затем проверяем существующий прогресс
+                // НЕ регистрируем пользователя повторно
+                // await registerUser(); - закомментировано
+
+                // Проверяем существующий прогресс
                 await checkExistingProgress();
             } catch (error) {
                 console.error('Ошибка при загрузке:', error);
@@ -346,14 +339,8 @@
 
         // Обработка закрытия страницы
         window.addEventListener('beforeunload', async () => {
-            try {
-                if (db && nickname) {
-                    const userRef = ref(db, 'users/' + encodeURIComponent(nickname));
-                    await set(userRef, null);
-                }
-            } catch (error) {
-                console.error('Ошибка при выходе:', error);
-            }
+            // НЕ удаляем пользователя из базы - он может понадобиться на других страницах
+            console.log('Пользователь покидает страницу recognition.html');
         });
 
         // Глобальные функции для кнопок
