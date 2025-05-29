@@ -64,8 +64,8 @@
 
         <div id="question" class="hidden">
             <div class="terminal-line">Ты узнаёшь их?</div>
-            <button onclick="answer(true)">Да, конечно!</button>
-            <button onclick="answer(false)">Не всех...</button>
+            <button onclick="answer(true)">Да!</button>
+            <button onclick="answer(false)">Нет</button>
         </div>
     </div>
 
@@ -146,15 +146,18 @@
             document.getElementById(sectionId).classList.remove('hidden');
         }
 
-        async function displayUsers() {
-            const userListElement = document.getElementById("user-list");
-            const questionElement = document.getElementById("question");
+        async function displayUsers(users) {
+            const others = Object.values(users)
+                .map(user => user.nickname)
+                .filter(name => name !== nickname);
 
             userListElement.innerHTML = "";
+            questionElement.classList.add("hidden");
 
-            const others = allUsers.filter(name => name !== nickname);
-
-            if (others.length > 0) {
+            if (others.length === 0) {
+                await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
+                await addLineAnimated(userListElement, `Ожидаем других участников...`);
+            } else {
                 await addLineAnimated(userListElement, `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`);
 
                 for (const name of others) {
@@ -165,10 +168,9 @@
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     questionElement.classList.remove("hidden");
                 }
-            } else {
-                await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
-                await addLineAnimated(userListElement, `Мне нужно.. больше данных<span class="blinking">...</span>`);
             }
+
+            userListElement.classList.remove("hidden");
         }
 
         const usersRef = ref(db, 'users');
