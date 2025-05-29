@@ -129,19 +129,14 @@
         let allUsers = [];
         let isReady = false;
 
+        // Получаем DOM элементы
         const userListElement = document.getElementById('user-list');
         const questionElement = document.getElementById('question');
 
-        try {
-            app = initializeApp(firebaseConfig);
-            db = getDatabase(app);
-            nickname = new URLSearchParams(window.location.search).get("nickname") || "???";
-
-            await registerUser();
-        } catch (error) {
-            console.error('Ошибка инициализации:', error);
-            showError();
-        }
+        // Инициализация Firebase
+        app = initializeApp(firebaseConfig);
+        db = getDatabase(app);
+        nickname = new URLSearchParams(window.location.search).get("nickname") || "???";
 
         async function registerUser() {
             try {
@@ -226,6 +221,7 @@
                     await addLineAnimated(userListElement, `    → ${name}`);
                 }
 
+                // Показываем вопрос только если других участников >= 2
                 if (others.length >= 2) {
                     await new Promise(resolve => setTimeout(resolve, 1500));
                     questionElement.classList.remove("hidden");
@@ -233,6 +229,7 @@
             }
         }
 
+        // Слушаем изменения пользователей
         const usersRef = ref(db, 'users');
         onValue(usersRef, async (snapshot) => {
             try {
@@ -301,12 +298,16 @@
                         .map(user => `✓ ${user.nickname}`)
                         .join('<br>');
 
+                    // Переход к следующему этапу когда готово минимум 2 человека или 70% от общего числа
                     const minReady = Math.max(2, Math.floor(totalCount * 0.7));
                     if (readyCount >= minReady && totalCount >= 2) {
                         setTimeout(() => {
+                            // Можно заменить на актуальный URL следующего этапа
                             const nextStageUrl = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
                             console.log('Переход к следующему этапу:', nextStageUrl);
+                            // window.location.href = nextStageUrl;
 
+                            // Временно показываем сообщение вместо перехода
                             document.querySelector('#waiting .terminal-line').innerHTML =
                                 'Все готовы! Переход к следующему этапу... <br><em style="color: #ffcc00;">(Файл stage1.html не найден)</em>';
                         }, 2000);
@@ -317,8 +318,13 @@
             });
         }
 
+        // Инициализация при загрузке страницы
         window.addEventListener('load', async () => {
             try {
+                // Сначала регистрируем пользователя
+                await registerUser();
+
+                // Затем проверяем существующий прогресс
                 await checkExistingProgress();
             } catch (error) {
                 console.error('Ошибка при загрузке:', error);
@@ -326,6 +332,7 @@
             }
         });
 
+        // Обработка закрытия страницы
         window.addEventListener('beforeunload', async () => {
             try {
                 if (db && nickname) {
@@ -337,6 +344,7 @@
             }
         });
 
+        // Глобальные функции для кнопок
         window.answer = answer;
         window.markReady = markReady;
     </script>
