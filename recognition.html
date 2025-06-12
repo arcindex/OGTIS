@@ -7,8 +7,9 @@
         body {
             background-color: #000;
             color: #00ffcc;
-            font-family: monospace;
+            font-family: 'Courier New', monospace;
             padding: 40px;
+            line-height: 1.4;
         }
 
         .terminal-line {
@@ -20,30 +21,41 @@
             background-color: #00ffcc;
             color: #000;
             border: none;
-            padding: 8px 12px;
+            padding: 10px 16px;
             margin: 10px 5px;
             cursor: pointer;
             font-weight: bold;
-            border-radius: 3px;
+            border-radius: 4px;
+            font-family: inherit;
+            transition: all 0.2s ease;
         }
 
             button:hover {
                 background-color: #00ccaa;
+                transform: translateY(-1px);
+            }
+
+            button:disabled {
+                background-color: #666;
+                color: #999;
+                cursor: not-allowed;
+                transform: none;
             }
 
         .section {
             opacity: 1;
-            transition: opacity 0.3s ease;
+            transition: opacity 0.4s ease;
         }
 
             .section.hidden {
                 opacity: 0;
                 pointer-events: none;
                 position: absolute;
+                top: -9999px;
             }
 
         .blinking {
-            animation: blink 1s step-start infinite;
+            animation: blink 1.5s step-start infinite;
         }
 
         @keyframes blink {
@@ -54,32 +66,104 @@
 
         #ready-status {
             margin-top: 20px;
-            padding: 10px;
+            padding: 15px;
             border: 1px solid #00ffcc;
             border-radius: 5px;
+            background-color: rgba(0, 255, 204, 0.05);
         }
 
         .error-message {
             color: #ff6666;
             border: 1px solid #ff6666;
-            padding: 10px;
+            padding: 15px;
             margin: 10px 0;
             border-radius: 5px;
+            background-color: rgba(255, 102, 102, 0.1);
+        }
+
+        .success-message {
+            color: #66ff66;
+            border: 1px solid #66ff66;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background-color: rgba(102, 255, 102, 0.1);
         }
 
         .loading {
             color: #ffcc00;
         }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: #00ffcc;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .user-list {
+            margin: 10px 0;
+            padding: 10px;
+            border-left: 3px solid #00ffcc;
+            padding-left: 15px;
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+            .connection-status.online {
+                background-color: rgba(102, 255, 102, 0.2);
+                color: #66ff66;
+                border: 1px solid #66ff66;
+            }
+
+            .connection-status.offline {
+                background-color: rgba(255, 102, 102, 0.2);
+                color: #ff6666;
+                border: 1px solid #ff6666;
+            }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 20px;
+                font-size: 14px;
+            }
+
+            button {
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+        }
     </style>
 </head>
 <body>
+    <div class="connection-status" id="connection-status">
+        <span class="blinking">Подключение...</span>
+    </div>
+
     <div id="user-list-section" class="section">
         <div id="user-list"></div>
 
         <div id="question" class="hidden">
             <div class="terminal-line">Ты узнаёшь их?</div>
-            <button onclick="answer(true)">Да!</button>
-            <button onclick="answer(false)">Нет</button>
+            <button onclick="answer(true)" id="yes-btn">Да!</button>
+            <button onclick="answer(false)" id="no-btn">Нет</button>
         </div>
     </div>
 
@@ -90,7 +174,7 @@
         <div class="terminal-line">Я пройдусь по каждому из вас...</div>
         <div class="terminal-line">Вы вместе пройдёте весь путь...</div>
         <div class="terminal-line">Выявим вместе... кто вы...</div>
-        <button onclick="markReady()">Готов начать</button>
+        <button onclick="markReady()" id="ready-btn">Готов начать</button>
     </div>
 
     <div id="waiting" class="section hidden">
@@ -98,22 +182,33 @@
         <div class="terminal-line">Ожидание синхронизации с другими узлами<span class="blinking">...</span></div>
         <div id="ready-status">
             <div>Готовы к запуску: <span id="ready-count">0</span>/<span id="total-count">0</span></div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
             <div id="ready-list"></div>
         </div>
     </div>
 
     <div id="error-section" class="section hidden">
         <div class="error-message">
-            <div class="terminal-line">Ошибка подключения к системе...</div>
-            <div class="terminal-line">Проверьте подключение к сети и обновите страницу</div>
-            <button onclick="location.reload()">Попробовать снова</button>
+            <div class="terminal-line" id="error-text">Ошибка подключения к системе...</div>
+            <div class="terminal-line">Проверьте подключение к сети и попробуйте снова</div>
+            <button onclick="reconnect()" id="reconnect-btn">Попробовать снова</button>
+        </div>
+    </div>
+
+    <div id="success-section" class="section hidden">
+        <div class="success-message">
+            <div class="terminal-line">Все участники готовы!</div>
+            <div class="terminal-line">Переход к следующему этапу<span class="blinking">...</span></div>
         </div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, remove } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
+        // Your Firebase config (keep it as is for chat friends)
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
             authDomain: "ogtis-e2e4b.firebaseapp.com",
@@ -124,42 +219,59 @@
             databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
         };
 
+        // Configuration
+        const CONFIG = {
+            MIN_PARTICIPANTS: 2,
+            READY_THRESHOLD: 0.6, // 60% instead of 70%
+            TYPING_SPEED: 50,
+            TRANSITION_DELAY: 3000,
+            RECONNECT_INTERVAL: 5000
+        };
+
+        // Global state
         let app, db;
-        let nickname;
-        let allUsers = [];
+        let nickname = '';
+        let allUsers = new Set();
         let isReady = false;
-        let hasShownQuestion = false; // флаг чтобы не показывать вопрос повторно
+        let hasShownQuestion = false;
+        let connectionStatus = 'connecting';
+        let reconnectAttempts = 0;
+        let userListeners = [];
 
-        // Получаем DOM элементы
-        const userListElement = document.getElementById('user-list');
-        const questionElement = document.getElementById('question');
+        // Initialize Firebase and nickname
+        function initializeApp() {
+            app = initializeApp(firebaseConfig);
+            db = getDatabase(app);
 
-        // Инициализация Firebase
-        app = initializeApp(firebaseConfig);
-        db = getDatabase(app);
-        nickname = new URLSearchParams(window.location.search).get("nickname") || "???";
+            const urlParams = new URLSearchParams(window.location.search);
+            nickname = urlParams.get("nickname") || `Guest_${Date.now()}`;
 
-        async function registerUser() {
-            // ВООБЩЕ НЕ регистрируем пользователя - он уже есть в базе из index.html
-            // Эта функция теperь пустая, чтобы не создавать дубликатов
-            console.log('Пользователь уже зарегистрирован в index.html:', nickname);
+            if (!nickname || nickname.length < 2) {
+                showError('Неверный никнейм. Пожалуйста, вернитесь на главную страницу.');
+                return false;
+            }
+            return true;
         }
 
-        async function checkExistingProgress() {
-            try {
-                const readyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
-                const snapshot = await get(readyRef);
-                if (snapshot.exists()) {
-                    showWaitingScreen();
-                    return true;
-                }
-                return false;
-            } catch (error) {
-                console.error('Ошибка проверки прогресса:', error);
-                return false;
+        // Connection status management
+        function updateConnectionStatus(status) {
+            connectionStatus = status;
+            const statusElement = document.getElementById('connection-status');
+
+            if (status === 'online') {
+                statusElement.textContent = 'Онлайн';
+                statusElement.className = 'connection-status online';
+                reconnectAttempts = 0;
+            } else if (status === 'offline') {
+                statusElement.textContent = 'Не в сети';
+                statusElement.className = 'connection-status offline';
+            } else {
+                statusElement.innerHTML = '<span class="blinking">Подключение...</span>';
+                statusElement.className = 'connection-status';
             }
         }
 
+        // UI Animation functions
         function addLineAnimated(container, html) {
             return new Promise(resolve => {
                 const line = document.createElement("div");
@@ -167,16 +279,19 @@
                 container.appendChild(line);
 
                 let i = 0;
-                const text = html;
+                const plainText = html.replace(/<[^>]*>/g, '');
                 const interval = setInterval(() => {
-                    line.innerHTML = text.slice(0, i) + (i < text.length && i % 2 === 0 ? "_" : "");
+                    const currentText = plainText.slice(0, i);
+                    const cursor = (i < plainText.length && i % 2 === 0) ? "_" : "";
+                    line.innerHTML = html.replace(plainText, currentText + cursor);
                     i++;
-                    if (i > text.length + 2) {
+
+                    if (i > plainText.length + 2) {
                         clearInterval(interval);
-                        line.innerHTML = text;
+                        line.innerHTML = html;
                         resolve();
                     }
-                }, 50);
+                }, CONFIG.TYPING_SPEED);
             });
         }
 
@@ -190,31 +305,68 @@
             }
         }
 
-        function showError() {
+        function showError(message = 'Произошла ошибка подключения') {
+            document.getElementById('error-text').textContent = message;
             showSection('error-section');
+        }
+
+        // Firebase functions
+        async function registerUser() {
+            try {
+                const userRef = ref(db, 'users/' + encodeURIComponent(nickname));
+                await set(userRef, {
+                    nickname: nickname,
+                    joinTime: Date.now(),
+                    lastSeen: Date.now()
+                });
+
+                // Set up automatic cleanup on disconnect
+                const disconnectRef = onDisconnect(userRef);
+                await disconnectRef.remove();
+
+                updateConnectionStatus('online');
+                return true;
+            } catch (error) {
+                console.error('Registration failed:', error);
+                updateConnectionStatus('offline');
+                return false;
+            }
+        }
+
+        async function checkExistingProgress() {
+            try {
+                const readyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
+                const snapshot = await get(readyRef);
+                if (snapshot.exists()) {
+                    showWaitingScreen();
+                    return true;
+                }
+                return false;
+            } catch (error) {
+                console.error('Progress check failed:', error);
+                return false;
+            }
         }
 
         async function displayUsers(users) {
             if (!users) return;
 
-            // Получаем уникальные никнеймы (без дубликатов)
-            const allNicknames = Object.values(users).map(user => user.nickname);
-            const uniqueNicknames = [...new Set(allNicknames)]; // убираем дубликаты
-
+            const userList = Object.values(users);
+            const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
             const others = uniqueNicknames.filter(name => name !== nickname);
 
-            // Очищаем только список пользователей, НЕ трогаем вопрос если он уже показан
+            allUsers = new Set(uniqueNicknames);
+
+            const userListElement = document.getElementById('user-list');
             userListElement.innerHTML = "";
 
-            // Скрываем вопрос только если еще не показывали или участников стало меньше
-            if (!hasShownQuestion || others.length < 2) {
-                questionElement.classList.add("hidden");
-                hasShownQuestion = false;
+            // Reset question state if not enough participants
+            if (!hasShownQuestion || others.length < CONFIG.MIN_PARTICIPANTS - 1) {
+                document.getElementById('question').classList.add("hidden");
+                if (others.length < CONFIG.MIN_PARTICIPANTS - 1) {
+                    hasShownQuestion = false;
+                }
             }
-
-            console.log('Всего уникальных участников:', uniqueNicknames.length);
-            console.log('Других участников (кроме меня):', others.length);
-            console.log('Уже показывали вопрос?', hasShownQuestion);
 
             if (others.length === 0) {
                 await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
@@ -222,56 +374,38 @@
             } else {
                 await addLineAnimated(userListElement, `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`);
 
+                const listContainer = document.createElement('div');
+                listContainer.className = 'user-list';
+                userListElement.appendChild(listContainer);
+
                 for (const name of others) {
-                    await addLineAnimated(userListElement, `    → ${name}`);
+                    await addLineAnimated(listContainer, `→ ${name}`);
                 }
 
-                // Показываем вопрос только если других участников >= 2 И еще не показывали
-                if (others.length >= 2 && !hasShownQuestion && !isReady) {
-                    console.log('Показываем вопрос впервые!');
+                // Show question if enough participants and not shown before
+                if (others.length >= CONFIG.MIN_PARTICIPANTS - 1 && !hasShownQuestion && !isReady) {
                     hasShownQuestion = true;
                     await new Promise(resolve => setTimeout(resolve, 1500));
-                    questionElement.classList.remove("hidden");
-                } else {
-                    console.log('Вопрос не показываем:', {
-                        'достаточно_участников': others.length >= 2,
-                        'уже_показывали': hasShownQuestion,
-                        'уже_готов': isReady
-                    });
+                    document.getElementById('question').classList.remove("hidden");
                 }
             }
         }
 
-        // Слушаем изменения пользователей
-        const usersRef = ref(db, 'users');
-        onValue(usersRef, async (snapshot) => {
-            try {
-                if (snapshot.exists()) {
-                    const users = snapshot.val();
-                    allUsers = Object.values(users).map(user => user.nickname);
-
-                    if (!isReady) {
-                        await displayUsers(users);
-                    } else {
-                        updateWaitingStatus();
-                    }
-                }
-            } catch (error) {
-                console.error('Ошибка обработки пользователей:', error);
-            }
-        }, (error) => {
-            console.error('Ошибка подключения к базе данных:', error);
-            showError();
-        });
-
+        // Quest logic functions
         function answer(recognize) {
-            questionElement.classList.add('hidden');
+            const yesBtn = document.getElementById('yes-btn');
+            const noBtn = document.getElementById('no-btn');
+
+            yesBtn.disabled = true;
+            noBtn.disabled = true;
+
+            document.getElementById('question').classList.add('hidden');
             showSection('post-question');
 
             const answerText = recognize
                 ? "А я... тяжело... надо пройтись по каждому..."
                 : "Я тоже... нужно больше информации...";
-            document.getElementById("answer-text").innerText = answerText;
+            document.getElementById("answer-text").textContent = answerText;
         }
 
         function showWaitingScreen() {
@@ -281,6 +415,10 @@
         }
 
         async function markReady() {
+            const readyBtn = document.getElementById('ready-btn');
+            readyBtn.disabled = true;
+            readyBtn.textContent = 'Регистрация...';
+
             try {
                 showWaitingScreen();
 
@@ -289,92 +427,173 @@
                     nickname: nickname,
                     timestamp: Date.now()
                 });
+
+                // Set up disconnect cleanup for ready status too
+                const disconnectRef = onDisconnect(userKeyRef);
+                await disconnectRef.remove();
+
             } catch (error) {
-                console.error('Ошибка отметки готовности:', error);
-                showError();
+                console.error('Mark ready failed:', error);
+                readyBtn.disabled = false;
+                readyBtn.textContent = 'Готов начать';
+                showError('Не удалось зарегистрировать готовность. Попробуйте снова.');
             }
         }
 
         function updateWaitingStatus() {
             const readyRef = ref(db, 'ready');
-            onValue(readyRef, snapshot => {
+            const unsubscribe = onValue(readyRef, snapshot => {
                 try {
                     const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
                     const readyCount = readyUsers.length;
-                    const totalCount = Math.max(allUsers.length, 1);
-
-                    console.log('Обновление статуса готовности:', {
-                        'готовых': readyCount,
-                        'всего': totalCount,
-                        'готовые_пользователи': readyUsers.map(u => u.nickname),
-                        'все_пользователи': allUsers
-                    });
+                    const totalCount = Math.max(allUsers.size, 1);
+                    const progress = (readyCount / totalCount) * 100;
 
                     document.getElementById('ready-count').textContent = readyCount;
                     document.getElementById('total-count').textContent = totalCount;
+                    document.getElementById('progress-fill').style.width = `${progress}%`;
 
                     const readyListElement = document.getElementById('ready-list');
                     readyListElement.innerHTML = readyUsers
                         .map(user => `✓ ${user.nickname}`)
                         .join('<br>');
 
-                    // ИСПРАВЛЕННАЯ ЛОГИКА: нужно минимум 2 участника И минимум 70% готовых
-                    const minParticipants = 2;
-                    const minReadyPercent = 0.7;
-                    const minReadyCount = Math.max(2, Math.ceil(totalCount * minReadyPercent));
+                    // Improved threshold logic
+                    const minReadyCount = Math.max(CONFIG.MIN_PARTICIPANTS,
+                        Math.ceil(totalCount * CONFIG.READY_THRESHOLD));
 
-                    console.log('Условия для перехода:', {
-                        'участников_достаточно': totalCount >= minParticipants,
-                        'готовых_достаточно': readyCount >= minReadyCount,
-                        'минимум_готовых': minReadyCount,
-                        'всего_участников': totalCount
+                    console.log('Ready status:', {
+                        readyCount,
+                        totalCount,
+                        minReadyCount,
+                        threshold: CONFIG.READY_THRESHOLD
                     });
 
-                    if (totalCount >= minParticipants && readyCount >= minReadyCount) {
-                        console.log('Условия выполнены! Переход через 2 секунды...');
+                    if (totalCount >= CONFIG.MIN_PARTICIPANTS && readyCount >= minReadyCount) {
+                        showSection('success-section');
                         setTimeout(() => {
                             const nextStageUrl = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
-                            console.log('Переход к следующему этапу:', nextStageUrl);
+                            console.log('Navigating to:', nextStageUrl);
+                            // Uncomment when stage1.html is ready:
                             // window.location.href = nextStageUrl;
-
-                            // Временно показываем сообщение вместо перехода
-                            document.querySelector('#waiting .terminal-line').innerHTML =
-                                'Все готовы! Переход к следующему этапу... <br><em style="color: #ffcc00;">(Файл stage1.html не найден)</em>';
-                        }, 2000);
-                    } else {
-                        console.log('Условия НЕ выполнены, ждем...');
+                        }, CONFIG.TRANSITION_DELAY);
                     }
                 } catch (error) {
-                    console.error('Ошибка обновления статуса:', error);
+                    console.error('Status update error:', error);
                 }
+            }, error => {
+                console.error('Ready listener error:', error);
+                updateConnectionStatus('offline');
             });
+
+            userListeners.push(unsubscribe);
         }
 
-        // Инициализация при загрузке страницы
-        window.addEventListener('load', async () => {
+        async function reconnect() {
+            const reconnectBtn = document.getElementById('reconnect-btn');
+            reconnectBtn.disabled = true;
+            reconnectBtn.textContent = 'Переподключение...';
+
+            reconnectAttempts++;
+            updateConnectionStatus('connecting');
+
             try {
-                console.log('Загрузка страницы, nickname:', nickname);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                const success = await registerUser();
 
-                // НЕ регистрируем пользователя повторно
-                // await registerUser(); - закомментировано
-
-                // Проверяем существующий прогресс
-                await checkExistingProgress();
+                if (success) {
+                    const hasProgress = await checkExistingProgress();
+                    if (!hasProgress) {
+                        showSection('user-list-section');
+                        setupUserListener();
+                    }
+                } else {
+                    throw new Error('Registration failed');
+                }
             } catch (error) {
-                console.error('Ошибка при загрузке:', error);
+                console.error('Reconnection failed:', error);
+                updateConnectionStatus('offline');
+
+                reconnectBtn.disabled = false;
+                reconnectBtn.textContent = 'Попробовать снова';
+
+                if (reconnectAttempts < 3) {
+                    setTimeout(reconnect, CONFIG.RECONNECT_INTERVAL);
+                }
+            }
+        }
+
+        function setupUserListener() {
+            const usersRef = ref(db, 'users');
+            const unsubscribe = onValue(usersRef, async (snapshot) => {
+                try {
+                    if (snapshot.exists()) {
+                        const users = snapshot.val();
+                        if (!isReady) {
+                            await displayUsers(users);
+                        } else {
+                            // Update user count for ready screen
+                            const userList = Object.values(users);
+                            const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
+                            allUsers = new Set(uniqueNicknames);
+                        }
+                    }
+                } catch (error) {
+                    console.error('User data processing error:', error);
+                }
+            }, (error) => {
+                console.error('User listener error:', error);
+                updateConnectionStatus('offline');
+                showError();
+            });
+
+            userListeners.push(unsubscribe);
+        }
+
+        // Initialization
+        async function initialize() {
+            if (!initializeApp()) {
+                return;
+            }
+
+            try {
+                updateConnectionStatus('connecting');
+
+                const registered = await registerUser();
+                if (!registered) {
+                    throw new Error('Failed to register user');
+                }
+
+                const hasProgress = await checkExistingProgress();
+                if (!hasProgress) {
+                    showSection('user-list-section');
+                    setupUserListener();
+                }
+
+            } catch (error) {
+                console.error('Initialization failed:', error);
                 showError();
             }
-        });
+        }
 
-        // Обработка закрытия страницы
-        window.addEventListener('beforeunload', async () => {
-            // НЕ удаляем пользователя из базы - он может понадобиться на других страницах
-            console.log('Пользователь покидает страницу recognition.html');
-        });
+        // Cleanup function
+        function cleanup() {
+            userListeners.forEach(unsubscribe => {
+                if (typeof unsubscribe === 'function') {
+                    unsubscribe();
+                }
+            });
+            userListeners = [];
+        }
 
-        // Глобальные функции для кнопок
+        // Event listeners
+        window.addEventListener('beforeunload', cleanup);
+        window.addEventListener('load', initialize);
+
+        // Global functions for buttons
         window.answer = answer;
         window.markReady = markReady;
+        window.reconnect = reconnect;
     </script>
 </body>
 </html>
