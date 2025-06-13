@@ -5,46 +5,69 @@
     <title>Другие...?</title>
     <style>
         body {
-            background-color: #000;
+            background: linear-gradient(135deg, #000 0%, #001a1a 100%);
             color: #00ffcc;
             font-family: 'Courier New', monospace;
             padding: 40px;
-            line-height: 1.4;
+            line-height: 1.6;
+            min-height: 100vh;
+            overflow-x: hidden;
         }
 
         .terminal-line {
             margin-bottom: 1em;
             white-space: pre-wrap;
+            animation: fadeIn 0.8s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         button {
-            background-color: #00ffcc;
+            background: linear-gradient(45deg, #00ffcc, #00ccaa);
             color: #000;
             border: none;
-            padding: 10px 16px;
-            margin: 10px 5px;
+            padding: 12px 20px;
+            margin: 15px 8px;
             cursor: pointer;
             font-weight: bold;
-            border-radius: 4px;
+            border-radius: 6px;
             font-family: inherit;
-            transition: all 0.2s ease;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 255, 204, 0.3);
         }
 
             button:hover {
-                background-color: #00ccaa;
-                transform: translateY(-1px);
+                background: linear-gradient(45deg, #00ccaa, #009988);
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(0, 255, 204, 0.4);
+            }
+
+            button:active {
+                transform: translateY(0);
             }
 
             button:disabled {
-                background-color: #666;
-                color: #999;
+                background: #333;
+                color: #666;
                 cursor: not-allowed;
                 transform: none;
+                box-shadow: none;
             }
 
         .section {
             opacity: 1;
-            transition: opacity 0.4s ease;
+            transition: opacity 0.6s ease;
         }
 
             .section.hidden {
@@ -66,18 +89,52 @@
 
         .error-message {
             color: #ff6666;
-            border: 1px solid #ff6666;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 5px;
-            background-color: rgba(255, 102, 102, 0.1);
+            border: 2px solid #ff6666;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+            background: rgba(255, 102, 102, 0.1);
+            backdrop-filter: blur(5px);
         }
 
         .user-list {
-            margin: 10px 0;
-            padding: 10px;
-            border-left: 3px solid #00ffcc;
-            padding-left: 15px;
+            margin: 15px 0;
+            padding: 20px;
+            border-left: 4px solid #00ffcc;
+            padding-left: 20px;
+            background: rgba(0, 255, 204, 0.05);
+            border-radius: 0 8px 8px 0;
+        }
+
+        .connection-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #00ffcc;
+            box-shadow: 0 0 10px #00ffcc;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .question-container {
+            background: rgba(0, 255, 204, 0.1);
+            border: 1px solid #00ffcc;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
         }
 
         @media (max-width: 768px) {
@@ -87,20 +144,25 @@
             }
 
             button {
-                padding: 8px 12px;
-                font-size: 14px;
+                padding: 10px 16px;
+                font-size: 13px;
+                margin: 10px 5px;
             }
         }
     </style>
 </head>
 <body>
+    <div class="connection-indicator"></div>
+
     <div id="user-list-section" class="section">
         <div id="user-list"></div>
 
         <div id="question" class="hidden">
-            <div class="terminal-line">Ты узнаёшь их?</div>
-            <button onclick="answer(true)" id="yes-btn">Да!</button>
-            <button onclick="answer(false)" id="no-btn">Нет</button>
+            <div class="question-container">
+                <div class="terminal-line">Ты узнаёшь их?</div>
+                <button onclick="answer(true)" id="yes-btn">Да!</button>
+                <button onclick="answer(false)" id="no-btn">Нет</button>
+            </div>
         </div>
     </div>
 
@@ -124,7 +186,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, onDisconnect, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, update, get, onDisconnect } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -138,47 +200,146 @@
 
         const CONFIG = {
             MIN_PARTICIPANTS: 3,
-            TYPING_SPEED: 50,
-            RECONNECT_INTERVAL: 5000
+            TYPING_SPEED: 40,
+            RECONNECT_DELAY: 2000
         };
 
-        let app, db;
-        let nickname = '';
+        let app, db, nickname, userKey;
         let allUsers = new Set();
         let hasShownQuestion = false;
-        let userListeners = [];
-        let userKey = null;
         let hasAnswered = false;
+        let listeners = [];
 
-        function initializeGameApp() {
+        function initialize() {
             app = initializeApp(firebaseConfig);
             db = getDatabase(app);
 
             const urlParams = new URLSearchParams(window.location.search);
-            nickname = urlParams.get("nickname") || `Guest_${Date.now()}`;
+            nickname = urlParams.get("nickname");
 
-            if (!nickname || nickname.length < 2) {
-                showError('Неверный никнейм. Пожалуйста, вернитесь на главную страницу.');
-                return false;
+            if (!nickname?.trim()) {
+                showError('Неверный никнейм. Вернитесь на главную страницу.');
+                return;
             }
-            return true;
+
+            findUserAndSetup();
         }
 
-        function addLineAnimated(container, html) {
+        async function findUserAndSetup() {
+            try {
+                userKey = await findUserKey();
+                if (!userKey) {
+                    throw new Error('Пользователь не найден');
+                }
+
+                await updateUserStatus();
+                setupListeners();
+                showSection('user-list-section');
+            } catch (error) {
+                console.error('Setup failed:', error);
+                showError('Не удалось подключиться к системе');
+            }
+        }
+
+        async function findUserKey() {
+            const usersRef = ref(db, 'users');
+            const snapshot = await get(usersRef);
+
+            if (snapshot.exists()) {
+                const users = snapshot.val();
+                for (const [key, userData] of Object.entries(users)) {
+                    if (userData.nickname === nickname) {
+                        return key;
+                    }
+                }
+            }
+            return null;
+        }
+
+        async function updateUserStatus() {
+            const userRef = ref(db, 'users/' + userKey);
+            await update(userRef, {
+                lastSeen: Date.now(),
+                inRecognition: true
+            });
+
+            const disconnectRef = onDisconnect(userRef);
+            await disconnectRef.update({ inRecognition: false });
+        }
+
+        function setupListeners() {
+            const usersRef = ref(db, 'users');
+            const unsubscribe = onValue(usersRef, handleUsersUpdate, handleError);
+            listeners.push(unsubscribe);
+        }
+
+        async function handleUsersUpdate(snapshot) {
+            if (!snapshot.exists()) return;
+
+            const users = snapshot.val();
+            const userList = Object.values(users);
+            const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
+            const others = uniqueNicknames.filter(name => name !== nickname);
+
+            allUsers = new Set(uniqueNicknames);
+            await displayUsers(others, uniqueNicknames.length);
+        }
+
+        function handleError(error) {
+            console.error('Listener error:', error);
+            showError('Потеряно соединение с сервером');
+        }
+
+        async function displayUsers(others, totalPlayers) {
+            const userListElement = document.getElementById('user-list');
+            userListElement.innerHTML = "";
+
+            // Hide question if not enough players
+            if (totalPlayers < CONFIG.MIN_PARTICIPANTS) {
+                document.getElementById('question').classList.add("hidden");
+                hasShownQuestion = false;
+            }
+
+            if (others.length === 0) {
+                await addAnimatedLine(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
+                await addAnimatedLine(userListElement, `Ожидаем других участников<span class="blinking">...</span>`);
+            } else {
+                await addAnimatedLine(userListElement, `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`);
+
+                const listContainer = document.createElement('div');
+                listContainer.className = 'user-list';
+                userListElement.appendChild(listContainer);
+
+                for (const name of others) {
+                    await addAnimatedLine(listContainer, `→ ${name}`);
+                }
+
+                // Show question when enough players and not answered yet
+                if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasShownQuestion && !hasAnswered) {
+                    hasShownQuestion = true;
+                    setTimeout(() => {
+                        document.getElementById('question').classList.remove("hidden");
+                    }, 1000);
+                }
+            }
+        }
+
+        function addAnimatedLine(container, html) {
             return new Promise(resolve => {
                 const line = document.createElement("div");
                 line.className = "terminal-line";
                 container.appendChild(line);
 
-                let i = 0;
                 const plainText = html.replace(/<[^>]*>/g, '');
+                let i = 0;
+
                 const interval = setInterval(() => {
                     const currentText = plainText.slice(0, i);
-                    const cursor = (i < plainText.length && i % 2 === 0) ? "_" : "";
+                    const cursor = (i < plainText.length) ? "_" : "";
                     line.innerHTML = html.replace(plainText, currentText + cursor);
                     i++;
 
-                    if (i > plainText.length + 2) {
+                    if (i > plainText.length + 1) {
                         clearInterval(interval);
                         line.innerHTML = html;
                         resolve();
@@ -191,124 +352,28 @@
             document.querySelectorAll('.section').forEach(section => {
                 section.classList.add('hidden');
             });
-            const targetSection = document.getElementById(sectionId);
-            if (targetSection) {
-                targetSection.classList.remove('hidden');
-            }
+            document.getElementById(sectionId)?.classList.remove('hidden');
         }
 
-        function showError(message = 'Произошла ошибка подключения') {
+        function showError(message) {
             document.getElementById('error-text').textContent = message;
             showSection('error-section');
         }
 
-        async function findUserKey() {
-            try {
-                const usersRef = ref(db, 'users');
-                const snapshot = await get(usersRef);
-
-                if (snapshot.exists()) {
-                    const users = snapshot.val();
-                    for (const [key, userData] of Object.entries(users)) {
-                        if (userData.nickname === nickname) {
-                            userKey = key;
-                            return key;
-                        }
-                    }
-                }
-                return null;
-            } catch (error) {
-                console.error('Error finding user key:', error);
-                return null;
-            }
-        }
-
-        async function updateUserStatus() {
-            try {
-                if (!userKey) {
-                    userKey = await findUserKey();
-                }
-
-                if (userKey) {
-                    const userRef = ref(db, 'users/' + userKey);
-                    await update(userRef, {
-                        lastSeen: Date.now(),
-                        inRecognition: true
-                    });
-
-                    const disconnectRef = onDisconnect(userRef);
-                    await disconnectRef.update({
-                        inRecognition: false
-                    });
-
-                    return true;
-                } else {
-                    throw new Error('User not found in database');
-                }
-            } catch (error) {
-                console.error('Status update failed:', error);
-                return false;
-            }
-        }
-
-        async function displayUsers(users) {
-            if (!users) return;
-
-            const userList = Object.values(users);
-            const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
-            const others = uniqueNicknames.filter(name => name !== nickname);
-
-            allUsers = new Set(uniqueNicknames);
-
-            const userListElement = document.getElementById('user-list');
-            userListElement.innerHTML = "";
-
-            const totalPlayers = uniqueNicknames.length;
-
-            if (!hasShownQuestion || totalPlayers < CONFIG.MIN_PARTICIPANTS) {
-                document.getElementById('question').classList.add("hidden");
-                if (totalPlayers < CONFIG.MIN_PARTICIPANTS) {
-                    hasShownQuestion = false;
-                }
-            }
-
-            if (others.length === 0) {
-                await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
-                await addLineAnimated(userListElement, `Ожидаем других участников<span class="blinking">...</span>`);
-            } else {
-                await addLineAnimated(userListElement, `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`);
-
-                const listContainer = document.createElement('div');
-                listContainer.className = 'user-list';
-                userListElement.appendChild(listContainer);
-
-                for (const name of others) {
-                    await addLineAnimated(listContainer, `→ ${name}`);
-                }
-
-                if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasShownQuestion && !hasAnswered) {
-                    hasShownQuestion = true;
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                    document.getElementById('question').classList.remove("hidden");
-                }
-            }
-        }
-
         function answer(recognize) {
             hasAnswered = true;
-            const yesBtn = document.getElementById('yes-btn');
-            const noBtn = document.getElementById('no-btn');
 
-            yesBtn.disabled = true;
-            noBtn.disabled = true;
+            // Disable buttons
+            document.getElementById('yes-btn').disabled = true;
+            document.getElementById('no-btn').disabled = true;
 
-            document.getElementById('question').classList.add('hidden');
-            showSection('post-question');
-
+            // Show result
             const answerText = recognize
                 ? "А я... тяжело... надо пройтись по каждому..."
                 : "Я тоже... нужно больше информации...";
+
             document.getElementById("answer-text").textContent = answerText;
+            showSection('post-question');
         }
 
         function proceedToStart() {
@@ -316,81 +381,33 @@
         }
 
         async function reconnect() {
-            const reconnectBtn = document.getElementById('reconnect-btn');
-            reconnectBtn.disabled = true;
-            reconnectBtn.textContent = 'Переподключение...';
+            const btn = document.getElementById('reconnect-btn');
+            btn.disabled = true;
+            btn.textContent = 'Переподключение...';
 
-            try {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                const success = await updateUserStatus();
-
-                if (success) {
-                    showSection('user-list-section');
-                    setupUserListener();
-                } else {
-                    throw new Error('Status update failed');
-                }
-            } catch (error) {
-                console.error('Reconnection failed:', error);
-                reconnectBtn.disabled = false;
-                reconnectBtn.textContent = 'Попробовать снова';
-            }
-        }
-
-        function setupUserListener() {
-            const usersRef = ref(db, 'users');
-            const unsubscribe = onValue(usersRef, async (snapshot) => {
+            setTimeout(async () => {
                 try {
-                    if (snapshot.exists()) {
-                        const users = snapshot.val();
-                        await displayUsers(users);
-                    }
+                    await findUserAndSetup();
                 } catch (error) {
-                    console.error('User data processing error:', error);
+                    btn.disabled = false;
+                    btn.textContent = 'Попробовать снова';
                 }
-            }, (error) => {
-                console.error('User listener error:', error);
-                showError();
-            });
-
-            userListeners.push(unsubscribe);
-        }
-
-        async function initialize() {
-            if (!initializeGameApp()) {
-                return;
-            }
-
-            try {
-                const statusUpdated = await updateUserStatus();
-                if (!statusUpdated) {
-                    throw new Error('Failed to update user status');
-                }
-
-                showSection('user-list-section');
-                setupUserListener();
-
-            } catch (error) {
-                console.error('Initialization failed:', error);
-                showError();
-            }
+            }, CONFIG.RECONNECT_DELAY);
         }
 
         function cleanup() {
-            userListeners.forEach(unsubscribe => {
-                if (typeof unsubscribe === 'function') {
-                    unsubscribe();
-                }
-            });
-            userListeners = [];
+            listeners.forEach(unsubscribe => unsubscribe?.());
+            listeners = [];
         }
 
-        window.addEventListener('beforeunload', cleanup);
-        window.addEventListener('load', initialize);
-
+        // Global functions
         window.answer = answer;
         window.proceedToStart = proceedToStart;
         window.reconnect = reconnect;
+
+        // Event listeners
+        window.addEventListener('beforeunload', cleanup);
+        window.addEventListener('load', initialize);
     </script>
 </body>
 </html>

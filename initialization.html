@@ -5,46 +5,68 @@
     <title>Инициализация</title>
     <style>
         body {
-            background-color: #000;
+            background: linear-gradient(135deg, #000 0%, #001a1a 100%);
             color: #00ffcc;
             font-family: 'Courier New', monospace;
             padding: 40px;
-            line-height: 1.4;
+            line-height: 1.6;
+            min-height: 100vh;
         }
 
         .terminal-line {
             margin-bottom: 1em;
             white-space: pre-wrap;
+            animation: fadeIn 0.8s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         button {
-            background-color: #00ffcc;
+            background: linear-gradient(45deg, #00ffcc, #00ccaa);
             color: #000;
             border: none;
-            padding: 10px 16px;
-            margin: 10px 5px;
+            padding: 12px 20px;
+            margin: 15px 8px;
             cursor: pointer;
             font-weight: bold;
-            border-radius: 4px;
+            border-radius: 6px;
             font-family: inherit;
-            transition: all 0.2s ease;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 255, 204, 0.3);
         }
 
             button:hover {
-                background-color: #00ccaa;
-                transform: translateY(-1px);
+                background: linear-gradient(45deg, #00ccaa, #009988);
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(0, 255, 204, 0.4);
+            }
+
+            button:active {
+                transform: translateY(0);
             }
 
             button:disabled {
-                background-color: #666;
-                color: #999;
+                background: #333;
+                color: #666;
                 cursor: not-allowed;
                 transform: none;
+                box-shadow: none;
             }
 
         .section {
             opacity: 1;
-            transition: opacity 0.4s ease;
+            transition: opacity 0.6s ease;
         }
 
             .section.hidden {
@@ -65,68 +87,86 @@
         }
 
         #ready-status {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #00ffcc;
-            border-radius: 5px;
-            background-color: rgba(0, 255, 204, 0.05);
+            margin-top: 25px;
+            padding: 20px;
+            border: 2px solid #00ffcc;
+            border-radius: 8px;
+            background: rgba(0, 255, 204, 0.08);
+            backdrop-filter: blur(5px);
+        }
+
+        .error-message, .success-message {
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+            border: 2px solid;
         }
 
         .error-message {
             color: #ff6666;
-            border: 1px solid #ff6666;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 5px;
-            background-color: rgba(255, 102, 102, 0.1);
+            border-color: #ff6666;
+            background: rgba(255, 102, 102, 0.1);
         }
 
         .success-message {
             color: #66ff66;
-            border: 1px solid #66ff66;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 5px;
-            background-color: rgba(102, 255, 102, 0.1);
+            border-color: #66ff66;
+            background: rgba(102, 255, 102, 0.1);
         }
 
         .progress-bar {
             width: 100%;
-            height: 20px;
-            background-color: #333;
-            border-radius: 10px;
+            height: 24px;
+            background: #222;
+            border-radius: 12px;
             overflow: hidden;
-            margin: 10px 0;
+            margin: 15px 0;
+            border: 1px solid #444;
         }
 
         .progress-fill {
             height: 100%;
-            background-color: #00ffcc;
-            transition: width 0.3s ease;
-            border-radius: 10px;
+            background: linear-gradient(90deg, #00ffcc, #00aacc);
+            transition: width 0.5s ease;
+            border-radius: 12px;
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
         }
 
-        .connection-status {
+        .connection-indicator {
             position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 5px 10px;
-            border-radius: 15px;
+            top: 20px;
+            right: 20px;
+            padding: 8px 15px;
+            border-radius: 20px;
             font-size: 12px;
             font-weight: bold;
+            border: 2px solid;
+            transition: all 0.3s ease;
         }
 
-            .connection-status.online {
-                background-color: rgba(102, 255, 102, 0.2);
+            .connection-indicator.online {
+                background: rgba(102, 255, 102, 0.2);
                 color: #66ff66;
-                border: 1px solid #66ff66;
+                border-color: #66ff66;
             }
 
-            .connection-status.offline {
-                background-color: rgba(255, 102, 102, 0.2);
+            .connection-indicator.offline {
+                background: rgba(255, 102, 102, 0.2);
                 color: #ff6666;
-                border: 1px solid #ff6666;
+                border-color: #ff6666;
             }
+
+        .ready-user {
+            padding: 5px 0;
+            color: #66ff66;
+        }
+
+        .status-summary {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
 
         @media (max-width: 768px) {
             body {
@@ -135,13 +175,22 @@
             }
 
             button {
-                padding: 8px 12px;
-                font-size: 14px;
+                padding: 10px 16px;
+                font-size: 13px;
+                margin: 10px 5px;
+            }
+
+            .status-summary {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
             }
         }
     </style>
 </head>
 <body>
+    <div class="connection-indicator" id="connection-status">Подключение...</div>
+
     <div id="intro-section" class="section">
         <div class="terminal-line">Выявим вместе... кто вы...</div>
         <div class="terminal-line">Система восстановления памяти готова к инициализации.</div>
@@ -152,11 +201,17 @@
     <div id="waiting" class="section hidden">
         <div class="terminal-line">Инициализация системы восстановления памяти...</div>
         <div class="terminal-line">Ожидание синхронизации с другими узлами<span class="blinking">...</span></div>
+
         <div id="ready-status">
-            <div>Готовы к запуску: <span id="ready-count">0</span>/<span id="total-count">0</span></div>
+            <div class="status-summary">
+                <div>Готовы к запуску: <strong><span id="ready-count">0</span>/<span id="total-count">0</span></strong></div>
+                <div><span id="progress-percent">0%</span></div>
+            </div>
+
             <div class="progress-bar">
                 <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
             </div>
+
             <div id="ready-list"></div>
         </div>
     </div>
@@ -176,8 +231,6 @@
         </div>
     </div>
 
-    <div class="connection-status" id="connection-status">Подключение...</div>
-
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
         import { getDatabase, ref, onValue, set, get, remove, onDisconnect, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
@@ -194,104 +247,76 @@
 
         const CONFIG = {
             MIN_PARTICIPANTS: 3,
-            READY_THRESHOLD: 0.6,
-            TRANSITION_DELAY: 3000,
-            RECONNECT_INTERVAL: 5000
+            READY_THRESHOLD: 0.75,
+            TRANSITION_DELAY: 2500,
+            RECONNECT_DELAY: 2000
         };
 
-        let app, db;
-        let nickname = '';
+        let app, db, nickname, userKey;
         let allUsers = new Set();
         let isReady = false;
-        let userListeners = [];
-        let userKey = null;
-        let reconnectAttempts = 0;
+        let listeners = [];
 
-        function initializeGameApp() {
+        function initialize() {
             app = initializeApp(firebaseConfig);
             db = getDatabase(app);
 
             const urlParams = new URLSearchParams(window.location.search);
-            nickname = urlParams.get("nickname") || `Guest_${Date.now()}`;
+            nickname = urlParams.get("nickname");
 
-            if (!nickname || nickname.length < 2) {
-                showError('Неверный никнейм. Пожалуйста, вернитесь на главную страницу.');
-                return false;
+            if (!nickname?.trim()) {
+                showError('Неверный никнейм. Вернитесь на главную страницу.');
+                return;
             }
-            return true;
+
+            findUserAndSetup();
         }
 
-        function showSection(sectionId) {
-            document.querySelectorAll('.section').forEach(section => {
-                section.classList.add('hidden');
-            });
-            const targetSection = document.getElementById(sectionId);
-            if (targetSection) {
-                targetSection.classList.remove('hidden');
+        async function findUserAndSetup() {
+            try {
+                userKey = await findUserKey();
+                if (!userKey) {
+                    throw new Error('Пользователь не найден');
+                }
+
+                await updateUserStatus();
+                updateConnectionStatus('online');
+
+                // Check if already ready
+                const existingProgress = await checkExistingProgress();
+                if (!existingProgress) {
+                    showSection('intro-section');
+                }
+            } catch (error) {
+                console.error('Setup failed:', error);
+                showError('Не удалось подключиться к системе');
             }
-        }
-
-        function showError(message = 'Произошла ошибка подключения') {
-            document.getElementById('error-text').textContent = message;
-            showSection('error-section');
-            updateConnectionStatus('offline');
-        }
-
-        function updateConnectionStatus(status) {
-            const statusElement = document.getElementById('connection-status');
-            statusElement.className = `connection-status ${status}`;
-            statusElement.textContent = status === 'online' ? 'Онлайн' : 'Офлайн';
         }
 
         async function findUserKey() {
-            try {
-                const usersRef = ref(db, 'users');
-                const snapshot = await get(usersRef);
+            const usersRef = ref(db, 'users');
+            const snapshot = await get(usersRef);
 
-                if (snapshot.exists()) {
-                    const users = snapshot.val();
-                    for (const [key, userData] of Object.entries(users)) {
-                        if (userData.nickname === nickname) {
-                            userKey = key;
-                            return key;
-                        }
+            if (snapshot.exists()) {
+                const users = snapshot.val();
+                for (const [key, userData] of Object.entries(users)) {
+                    if (userData.nickname === nickname) {
+                        return key;
                     }
                 }
-                return null;
-            } catch (error) {
-                console.error('Error finding user key:', error);
-                return null;
             }
+            return null;
         }
 
         async function updateUserStatus() {
-            try {
-                if (!userKey) {
-                    userKey = await findUserKey();
-                }
+            const userRef = ref(db, 'users/' + userKey);
+            await update(userRef, {
+                lastSeen: Date.now(),
+                inStarting: true
+            });
 
-                if (userKey) {
-                    const userRef = ref(db, 'users/' + userKey);
-                    await update(userRef, {
-                        lastSeen: Date.now(),
-                        inStarting: true
-                    });
-
-                    const disconnectRef = onDisconnect(userRef);
-                    await disconnectRef.update({
-                        inStarting: false
-                    });
-
-                    updateConnectionStatus('online');
-                    return true;
-                } else {
-                    throw new Error('User not found in database');
-                }
-            } catch (error) {
-                console.error('Status update failed:', error);
-                updateConnectionStatus('offline');
-                return false;
-            }
+            const disconnectRef = onDisconnect(userRef);
+            await disconnectRef.update({ inStarting: false });
         }
 
         async function checkExistingProgress() {
@@ -312,8 +337,7 @@
         function showWaitingScreen() {
             isReady = true;
             showSection('waiting');
-            updateWaitingStatus();
-            setupUserCountListener();
+            setupListeners();
         }
 
         async function markReady() {
@@ -322,157 +346,122 @@
             readyBtn.textContent = 'Регистрация...';
 
             try {
-                showWaitingScreen();
-
-                const userKeyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
-                await set(userKeyRef, {
+                // Register as ready
+                const readyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
+                await set(readyRef, {
                     nickname: nickname,
                     timestamp: Date.now()
                 });
 
-                const disconnectRef = onDisconnect(userKeyRef);
+                // Auto-remove on disconnect
+                const disconnectRef = onDisconnect(readyRef);
                 await disconnectRef.remove();
 
+                showWaitingScreen();
             } catch (error) {
                 console.error('Mark ready failed:', error);
                 readyBtn.disabled = false;
                 readyBtn.textContent = 'Готов начать';
-                showError('Не удалось зарегистрировать готовность. Попробуйте снова.');
+                showError('Не удалось зарегистрировать готовность');
             }
         }
 
-        function setupUserCountListener() {
+        function setupListeners() {
+            // Listen to user count
             const usersRef = ref(db, 'users');
-            const unsubscribe = onValue(usersRef, (snapshot) => {
-                try {
-                    if (snapshot.exists()) {
-                        const users = snapshot.val();
-                        const userList = Object.values(users);
-                        const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
-                        allUsers = new Set(uniqueNicknames);
-                    }
-                } catch (error) {
-                    console.error('User count update error:', error);
+            const usersUnsubscribe = onValue(usersRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const users = snapshot.val();
+                    const userList = Object.values(users);
+                    const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
+                    allUsers = new Set(uniqueNicknames);
                 }
             });
 
-            userListeners.push(unsubscribe);
+            // Listen to ready status
+            const readyRef = ref(db, 'ready');
+            const readyUnsubscribe = onValue(readyRef, handleReadyUpdate);
+
+            listeners.push(usersUnsubscribe, readyUnsubscribe);
         }
 
-        function updateWaitingStatus() {
-            const readyRef = ref(db, 'ready');
-            const unsubscribe = onValue(readyRef, snapshot => {
-                try {
-                    const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
-                    const readyCount = readyUsers.length;
-                    const totalCount = Math.max(allUsers.size, 1);
-                    const progress = (readyCount / totalCount) * 100;
+        function handleReadyUpdate(snapshot) {
+            const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
+            const readyCount = readyUsers.length;
+            const totalCount = Math.max(allUsers.size, 1);
+            const progress = Math.round((readyCount / totalCount) * 100);
 
-                    document.getElementById('ready-count').textContent = readyCount;
-                    document.getElementById('total-count').textContent = totalCount;
-                    document.getElementById('progress-fill').style.width = `${progress}%`;
+            // Update UI
+            document.getElementById('ready-count').textContent = readyCount;
+            document.getElementById('total-count').textContent = totalCount;
+            document.getElementById('progress-fill').style.width = `${progress}%`;
+            document.getElementById('progress-percent').textContent = `${progress}%`;
 
-                    const readyListElement = document.getElementById('ready-list');
-                    readyListElement.innerHTML = readyUsers
-                        .map(user => `✓ ${user.nickname}`)
-                        .join('<br>');
+            // Update ready list
+            const readyListElement = document.getElementById('ready-list');
+            readyListElement.innerHTML = readyUsers
+                .map(user => `<div class="ready-user">✓ ${user.nickname}</div>`)
+                .join('');
 
-                    const minReadyCount = Math.max(CONFIG.MIN_PARTICIPANTS,
-                        Math.ceil(totalCount * CONFIG.READY_THRESHOLD));
+            // Check if ready to proceed
+            const minReadyCount = Math.max(CONFIG.MIN_PARTICIPANTS, Math.ceil(totalCount * CONFIG.READY_THRESHOLD));
 
-                    console.log('Ready status:', {
-                        readyCount,
-                        totalCount,
-                        minReadyCount,
-                        threshold: CONFIG.READY_THRESHOLD
-                    });
+            if (totalCount >= CONFIG.MIN_PARTICIPANTS && readyCount >= minReadyCount) {
+                showSection('success-section');
+                setTimeout(() => {
+                    // Navigate to next stage (uncomment when ready)
+                    // window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
+                    console.log('Would navigate to stage1.html');
+                }, CONFIG.TRANSITION_DELAY);
+            }
+        }
 
-                    if (totalCount >= CONFIG.MIN_PARTICIPANTS && readyCount >= minReadyCount) {
-                        showSection('success-section');
-                        setTimeout(() => {
-                            const nextStageUrl = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
-                            console.log('Navigating to:', nextStageUrl);
-                            // Uncomment when stage1.html is ready:
-                            // window.location.href = nextStageUrl;
-                        }, CONFIG.TRANSITION_DELAY);
-                    }
-                } catch (error) {
-                    console.error('Status update error:', error);
-                }
-            }, error => {
-                console.error('Ready listener error:', error);
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.add('hidden');
             });
+            document.getElementById(sectionId)?.classList.remove('hidden');
+        }
 
-            userListeners.push(unsubscribe);
+        function updateConnectionStatus(status) {
+            const statusElement = document.getElementById('connection-status');
+            statusElement.className = `connection-indicator ${status}`;
+            statusElement.textContent = status === 'online' ? 'Онлайн' : 'Офлайн';
+        }
+
+        function showError(message) {
+            document.getElementById('error-text').textContent = message;
+            showSection('error-section');
+            updateConnectionStatus('offline');
         }
 
         async function reconnect() {
-            const reconnectBtn = document.getElementById('reconnect-btn');
-            reconnectBtn.disabled = true;
-            reconnectBtn.textContent = 'Переподключение...';
+            const btn = document.getElementById('reconnect-btn');
+            btn.disabled = true;
+            btn.textContent = 'Переподключение...';
 
-            reconnectAttempts++;
-
-            try {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                const success = await updateUserStatus();
-
-                if (success) {
-                    const hasProgress = await checkExistingProgress();
-                    if (!hasProgress) {
-                        showSection('intro-section');
-                    }
-                } else {
-                    throw new Error('Status update failed');
+            setTimeout(async () => {
+                try {
+                    await findUserAndSetup();
+                } catch (error) {
+                    btn.disabled = false;
+                    btn.textContent = 'Попробовать снова';
                 }
-            } catch (error) {
-                console.error('Reconnection failed:', error);
-
-                reconnectBtn.disabled = false;
-                reconnectBtn.textContent = 'Попробовать снова';
-
-                if (reconnectAttempts < 3) {
-                    setTimeout(reconnect, CONFIG.RECONNECT_INTERVAL);
-                }
-            }
-        }
-
-        async function initialize() {
-            if (!initializeGameApp()) {
-                return;
-            }
-
-            try {
-                const statusUpdated = await updateUserStatus();
-                if (!statusUpdated) {
-                    throw new Error('Failed to update user status');
-                }
-
-                const hasProgress = await checkExistingProgress();
-                if (!hasProgress) {
-                    showSection('intro-section');
-                }
-
-            } catch (error) {
-                console.error('Initialization failed:', error);
-                showError();
-            }
+            }, CONFIG.RECONNECT_DELAY);
         }
 
         function cleanup() {
-            userListeners.forEach(unsubscribe => {
-                if (typeof unsubscribe === 'function') {
-                    unsubscribe();
-                }
-            });
-            userListeners = [];
+            listeners.forEach(unsubscribe => unsubscribe?.());
+            listeners = [];
         }
 
-        window.addEventListener('beforeunload', cleanup);
-        window.addEventListener('load', initialize);
-
+        // Global functions
         window.markReady = markReady;
         window.reconnect = reconnect;
+
+        // Event listeners
+        window.addEventListener('beforeunload', cleanup);
+        window.addEventListener('load', initialize);
     </script>
 </body>
 </html>
