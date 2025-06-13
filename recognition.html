@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -139,12 +140,6 @@
                 border: 1px solid #ff6666;
             }
 
-        .player-count {
-            color: #ffcc00;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-
         @media (max-width: 768px) {
             body {
                 padding: 20px;
@@ -208,9 +203,9 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, remove, onDisconnect, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
-        // Your Firebase config
+        // Your Firebase config (keep it as is for chat friends)
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
             authDomain: "ogtis-e2e4b.firebaseapp.com",
@@ -223,8 +218,8 @@
 
         // Configuration
         const CONFIG = {
-            MIN_PARTICIPANTS: 3, // Minimum 3 players total to show question
-            READY_THRESHOLD: 0.6, // 60% ready to proceed
+            MIN_PARTICIPANTS: 3, // Minimum 3 players to show question
+            READY_THRESHOLD: 0.6, // 60% of players need to be ready
             TYPING_SPEED: 50,
             TRANSITION_DELAY: 3000,
             RECONNECT_INTERVAL: 5000
@@ -239,6 +234,7 @@
         let connectionStatus = 'connecting';
         let reconnectAttempts = 0;
         let userListeners = [];
+        let userKey = null; // Store the user's key from index.html
 
         // Initialize Firebase and nickname
         function initializeGameApp() {
@@ -294,23 +290,54 @@
             showSection('error-section');
         }
 
-        // Firebase functions
-        async function registerUser() {
+        // Firebase functions - Updated to not duplicate registration
+        async function findUserKey() {
             try {
-                const userRef = ref(db, 'users/' + encodeURIComponent(nickname));
-                await set(userRef, {
-                    nickname: nickname,
-                    joinTime: Date.now(),
-                    lastSeen: Date.now()
-                });
+                const usersRef = ref(db, 'users');
+                const snapshot = await get(usersRef);
 
-                // Set up automatic cleanup on disconnect
-                const disconnectRef = onDisconnect(userRef);
-                await disconnectRef.remove();
-
-                return true;
+                if (snapshot.exists()) {
+                    const users = snapshot.val();
+                    // Find the user key by nickname
+                    for (const [key, userData] of Object.entries(users)) {
+                        if (userData.nickname === nickname) {
+                            userKey = key;
+                            return key;
+                        }
+                    }
+                }
+                return null;
             } catch (error) {
-                console.error('Registration failed:', error);
+                console.error('Error finding user key:', error);
+                return null;
+            }
+        }
+
+        async function updateUserStatus() {
+            try {
+                if (!userKey) {
+                    userKey = await findUserKey();
+                }
+
+                if (userKey) {
+                    const userRef = ref(db, 'users/' + userKey);
+                    await update(userRef, {
+                        lastSeen: Date.now(),
+                        inRecognition: true
+                    });
+
+                    // Set up automatic cleanup on disconnect
+                    const disconnectRef = onDisconnect(userRef);
+                    await disconnectRef.update({
+                        inRecognition: false
+                    });
+
+                    return true;
+                } else {
+                    throw new Error('User not found in database');
+                }
+            } catch (error) {
+                console.error('Status update failed:', error);
                 return false;
             }
         }
@@ -336,25 +363,26 @@
             const userList = Object.values(users);
             const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
             const others = uniqueNicknames.filter(name => name !== nickname);
-            const totalPlayers = uniqueNicknames.length; // Total including current player
 
             allUsers = new Set(uniqueNicknames);
 
             const userListElement = document.getElementById('user-list');
             userListElement.innerHTML = "";
 
-            console.log(`Debug: Total players: ${totalPlayers}, Others: ${others.length}, Min required: ${CONFIG.MIN_PARTICIPANTS}`);
+            // Only show question if we have at least MIN_PARTICIPANTS total players
+            const totalPlayers = uniqueNicknames.length;
 
-            // Hide question if not enough total players
-            if (totalPlayers < CONFIG.MIN_PARTICIPANTS) {
+            // Reset question state if not enough participants
+            if (!hasShownQuestion || totalPlayers < CONFIG.MIN_PARTICIPANTS) {
                 document.getElementById('question').classList.add("hidden");
-                hasShownQuestion = false;
+                if (totalPlayers < CONFIG.MIN_PARTICIPANTS) {
+                    hasShownQuestion = false;
+                }
             }
 
             if (others.length === 0) {
                 await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
                 await addLineAnimated(userListElement, `Ожидаем других участников<span class="blinking">...</span>`);
-                await addLineAnimated(userListElement, `<div class="player-count">Игроков: ${totalPlayers}/${CONFIG.MIN_PARTICIPANTS}</div>`);
             } else {
                 await addLineAnimated(userListElement, `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`);
 
@@ -366,17 +394,11 @@
                     await addLineAnimated(listContainer, `→ ${name}`);
                 }
 
-                // Add player count
-                await addLineAnimated(userListElement, `<div class="player-count">Игроков: ${totalPlayers}/${CONFIG.MIN_PARTICIPANTS}</div>`);
-
-                // Show question ONLY if we have enough total players AND haven't shown it AND user isn't ready
+                // Show question only if we have at least MIN_PARTICIPANTS total players
                 if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasShownQuestion && !isReady) {
-                    console.log('Showing question - conditions met');
                     hasShownQuestion = true;
                     await new Promise(resolve => setTimeout(resolve, 1500));
                     document.getElementById('question').classList.remove("hidden");
-                } else {
-                    console.log(`Question not shown: totalPlayers=${totalPlayers}, hasShownQuestion=${hasShownQuestion}, isReady=${isReady}`);
                 }
             }
         }
@@ -487,7 +509,7 @@
 
             try {
                 await new Promise(resolve => setTimeout(resolve, 1000));
-                const success = await registerUser();
+                const success = await updateUserStatus();
 
                 if (success) {
                     const hasProgress = await checkExistingProgress();
@@ -496,7 +518,7 @@
                         setupUserListener();
                     }
                 } else {
-                    throw new Error('Registration failed');
+                    throw new Error('Status update failed');
                 }
             } catch (error) {
                 console.error('Reconnection failed:', error);
@@ -543,9 +565,9 @@
             }
 
             try {
-                const registered = await registerUser();
-                if (!registered) {
-                    throw new Error('Failed to register user');
+                const statusUpdated = await updateUserStatus();
+                if (!statusUpdated) {
+                    throw new Error('Failed to update user status');
                 }
 
                 const hasProgress = await checkExistingProgress();
