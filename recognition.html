@@ -134,7 +134,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, update, get, onDisconnect } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -146,17 +146,11 @@
             databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
         };
 
-        const CONFIG = {
-            MIN_PARTICIPANTS: 3,
-            QUESTION_SHOW_DELAY: 1000
-        };
+        const MIN_PARTICIPANTS = 3;
 
-        let app, db, nickname, userKey;
+        let app, db, nickname;
         let hasAnswered = false;
-        let currentUsers = new Set();
-        let listeners = [];
-        let questionTimer = null;
-        let lastUserCount = 0;
+        let unsubscribe = null;
 
         async function initialize() {
             try {
@@ -171,14 +165,8 @@
                     return;
                 }
 
-                userKey = await findUserKey();
-                if (!userKey) {
-                    showError('Пользователь не найден в системе.');
-                    return;
-                }
-
-                await updateUserStatus();
-                setupListeners();
+                await joinSession();
+                setupListener();
                 showSection('user-list-section');
 
             } catch (error) {
@@ -187,89 +175,40 @@
             }
         }
 
-        async function findUserKey() {
-            try {
-                const usersRef = ref(db, 'users');
-                const snapshot = await get(usersRef);
+        async function joinSession() {
+            const userRef = ref(db, `session/users/${nickname}`);
+            await set(userRef, {
+                nickname: nickname,
+                stage: 'recognition',
+                lastSeen: serverTimestamp()
+            });
 
+            // Auto-remove on disconnect
+            const disconnectRef = onDisconnect(userRef);
+            await disconnectRef.remove();
+        }
+
+        function setupListener() {
+            const usersRef = ref(db, 'session/users');
+            unsubscribe = onValue(usersRef, (snapshot) => {
                 if (snapshot.exists()) {
                     const users = snapshot.val();
-                    for (const [key, userData] of Object.entries(users)) {
-                        if (userData.nickname === nickname) {
-                            return key;
-                        }
-                    }
+                    const userList = Object.keys(users).filter(name => name !== nickname);
+                    displayUsers(userList);
+                } else {
+                    displayUsers([]);
                 }
-                return null;
-            } catch (error) {
-                console.error('Find user key failed:', error);
-                return null;
-            }
-        }
-
-        async function updateUserStatus() {
-            try {
-                const userRef = ref(db, 'users/' + userKey);
-                await update(userRef, {
-                    lastSeen: Date.now(),
-                    inRecognition: true
-                });
-
-                const disconnectRef = onDisconnect(userRef);
-                await disconnectRef.update({ inRecognition: false });
-            } catch (error) {
-                console.error('Update user status failed:', error);
-                throw error;
-            }
-        }
-
-        function setupListeners() {
-            const usersRef = ref(db, 'users');
-            const unsubscribe = onValue(usersRef, handleUsersUpdate, (error) => {
+            }, (error) => {
                 console.error('Database error:', error);
                 showError('Потеряно соединение с сервером');
             });
-            listeners.push(unsubscribe);
         }
 
-        function handleUsersUpdate(snapshot) {
-            if (!snapshot.exists()) {
-                displayUsers([], 0);
-                return;
-            }
-
-            try {
-                const users = snapshot.val();
-                const userList = Object.values(users).filter(user =>
-                    user && user.nickname && user.inRecognition
-                );
-
-                const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
-                const others = uniqueNicknames.filter(name => name !== nickname);
-
-                currentUsers = new Set(uniqueNicknames);
-                const totalCount = uniqueNicknames.length;
-
-                // Only update display if there's a meaningful change
-                if (totalCount !== lastUserCount || others.length > 0) {
-                    displayUsers(others, totalCount);
-                    lastUserCount = totalCount;
-                }
-            } catch (error) {
-                console.error('Handle users update failed:', error);
-                displayUsers([], 0);
-            }
-        }
-
-        function displayUsers(others, totalPlayers) {
+        function displayUsers(others) {
             const userListElement = document.getElementById('user-list');
             userListElement.innerHTML = "";
 
-            // Clear any pending question timer
-            if (questionTimer) {
-                clearTimeout(questionTimer);
-                questionTimer = null;
-            }
+            const totalCount = others.length + 1; // +1 for current user
 
             if (others.length === 0) {
                 addLine(userListElement, `Ты пока здесь один, ${nickname}...`);
@@ -286,36 +225,27 @@
                     addLine(listContainer, `→ ${name}`);
                 });
 
-                // Add status indicator
+                // Status indicator
                 const statusDiv = document.createElement('div');
                 statusDiv.className = 'status-indicator';
-                statusDiv.innerHTML = `Участников готово: <strong>${totalPlayers}/${CONFIG.MIN_PARTICIPANTS}</strong>`;
+                statusDiv.innerHTML = `Участников готово: <strong>${totalCount}/${MIN_PARTICIPANTS}</strong>`;
                 userListElement.appendChild(statusDiv);
 
-                // Show question with proper conditions and delay
-                scheduleQuestionDisplay(totalPlayers);
-            }
-        }
-
-        function scheduleQuestionDisplay(totalPlayers) {
-            const questionElement = document.getElementById('question');
-
-            // Always hide first
-            questionElement.classList.add("hidden");
-
-            // Only show if conditions are met and not already answered
-            if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasAnswered) {
-                questionTimer = setTimeout(() => {
-                    if (!hasAnswered) { // Double check in case state changed
-                        questionElement.classList.remove("hidden");
-                    }
-                }, CONFIG.QUESTION_SHOW_DELAY);
+                // Show question if enough participants and not answered
+                if (totalCount >= MIN_PARTICIPANTS && !hasAnswered) {
+                    setTimeout(() => {
+                        if (!hasAnswered) {
+                            document.getElementById('question').classList.remove("hidden");
+                        }
+                    }, 1000);
+                } else {
+                    hideQuestion();
+                }
             }
         }
 
         function hideQuestion() {
-            const questionElement = document.getElementById('question');
-            questionElement.classList.add("hidden");
+            document.getElementById('question').classList.add("hidden");
         }
 
         function addLine(container, html) {
@@ -329,10 +259,7 @@
             document.querySelectorAll('.section').forEach(section => {
                 section.classList.add('hidden');
             });
-            const targetSection = document.getElementById(sectionId);
-            if (targetSection) {
-                targetSection.classList.remove('hidden');
-            }
+            document.getElementById(sectionId)?.classList.remove('hidden');
         }
 
         function showError(message) {
@@ -342,30 +269,18 @@
 
         function answer(recognize) {
             if (hasAnswered) return;
-
             hasAnswered = true;
 
-            // Clear any pending timers
-            if (questionTimer) {
-                clearTimeout(questionTimer);
-                questionTimer = null;
-            }
+            // Disable buttons
+            document.getElementById('yes-btn').disabled = true;
+            document.getElementById('no-btn').disabled = true;
 
-            // Disable buttons with visual feedback
-            const yesBtn = document.getElementById('yes-btn');
-            const noBtn = document.getElementById('no-btn');
-
-            yesBtn.disabled = true;
-            noBtn.disabled = true;
-
-            // Show result
             const answerText = recognize
                 ? "А я... тяжело... надо пройтись по каждому..."
                 : "Я тоже... нужно больше информации...";
 
             document.getElementById("answer-text").textContent = answerText;
 
-            // Add small delay for better UX
             setTimeout(() => {
                 showSection('post-question');
             }, 500);
@@ -375,7 +290,6 @@
             const btn = document.getElementById('proceed-btn');
             btn.disabled = true;
             btn.textContent = 'Переход...';
-
             window.location.href = `initialization.html?nickname=${encodeURIComponent(nickname)}`;
         }
 
@@ -384,10 +298,7 @@
             btn.disabled = true;
             btn.textContent = 'Переподключение...';
 
-            // Reset state
             hasAnswered = false;
-            currentUsers.clear();
-            lastUserCount = 0;
 
             setTimeout(async () => {
                 try {
@@ -401,19 +312,10 @@
         }
 
         function cleanup() {
-            if (questionTimer) {
-                clearTimeout(questionTimer);
-                questionTimer = null;
+            if (unsubscribe) {
+                unsubscribe();
+                unsubscribe = null;
             }
-
-            listeners.forEach(unsubscribe => {
-                try {
-                    unsubscribe?.();
-                } catch (error) {
-                    console.error('Cleanup error:', error);
-                }
-            });
-            listeners = [];
         }
 
         // Global functions

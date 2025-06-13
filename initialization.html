@@ -87,7 +87,7 @@
             color: #66ff66;
         }
 
-        .not-ready-user {
+        .waiting-user {
             margin: 5px 0;
             color: #ffaa66;
         }
@@ -110,19 +110,6 @@
             height: 100%;
             background-color: #00ffcc;
             transition: width 0.5s ease;
-        }
-
-        .user-stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin: 15px 0;
-        }
-
-        .stat-box {
-            padding: 10px;
-            border: 1px solid #666;
-            background-color: rgba(0, 0, 0, 0.3);
         }
 
         .countdown {
@@ -155,17 +142,7 @@
                 <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
             </div>
 
-            <div class="user-stats">
-                <div class="stat-box">
-                    <strong>Активных участников:</strong> <span id="active-count">0</span>
-                </div>
-                <div class="stat-box">
-                    <strong>Минимум для старта:</strong> <span id="min-required">3</span>
-                </div>
-            </div>
-
-            <div id="ready-list"></div>
-            <div id="not-ready-list"></div>
+            <div id="user-lists"></div>
 
             <div id="countdown-section" class="hidden">
                 <div class="countdown">Автозапуск через: <span id="countdown">10</span> сек</div>
@@ -191,7 +168,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, remove, onDisconnect, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, remove, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -203,21 +180,15 @@
             databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
         };
 
-        const CONFIG = {
-            MIN_PARTICIPANTS: 3,
-            MIN_READY_RATIO: 0.75,
-            AUTO_START_DELAY: 10000, // 10 seconds
-            HIGH_READY_THRESHOLD: 0.9
-        };
+        const MIN_PARTICIPANTS = 3;
+        const AUTO_START_THRESHOLD = 0.8; // 80% ready
 
-        let app, db, nickname, userKey;
-        let totalUsers = 0;
-        let activeUsers = 0;
+        let app, db, nickname;
         let isMarkedReady = false;
-        let listeners = [];
+        let unsubscribeUsers = null;
+        let unsubscribeReady = null;
         let countdownTimer = null;
         let countdownSeconds = 10;
-        let lastUpdateTime = 0;
 
         async function initialize() {
             try {
@@ -232,17 +203,13 @@
                     return;
                 }
 
-                userKey = await findUserKey();
-                if (!userKey) {
-                    showError('Пользователь не найден в системе.');
-                    return;
-                }
+                await updateUserStage();
 
-                await updateUserStatus();
+                // Check if already ready
+                const readyRef = ref(db, `session/ready/${nickname}`);
+                const readySnapshot = await get(readyRef);
 
-                // Check if already marked ready
-                const alreadyReady = await checkIfAlreadyReady();
-                if (alreadyReady) {
+                if (readySnapshot.exists()) {
                     showWaitingScreen();
                 } else {
                     showSection('intro-section');
@@ -254,51 +221,16 @@
             }
         }
 
-        async function findUserKey() {
-            try {
-                const usersRef = ref(db, 'users');
-                const snapshot = await get(usersRef);
+        async function updateUserStage() {
+            const userRef = ref(db, `session/users/${nickname}`);
+            await set(userRef, {
+                nickname: nickname,
+                stage: 'initialization',
+                lastSeen: serverTimestamp()
+            });
 
-                if (snapshot.exists()) {
-                    const users = snapshot.val();
-                    for (const [key, userData] of Object.entries(users)) {
-                        if (userData && userData.nickname === nickname) {
-                            return key;
-                        }
-                    }
-                }
-                return null;
-            } catch (error) {
-                console.error('Find user key failed:', error);
-                return null;
-            }
-        }
-
-        async function updateUserStatus() {
-            try {
-                const userRef = ref(db, 'users/' + userKey);
-                await update(userRef, {
-                    lastSeen: Date.now(),
-                    inStarting: true
-                });
-
-                const disconnectRef = onDisconnect(userRef);
-                await disconnectRef.update({ inStarting: false });
-            } catch (error) {
-                console.error('Update user status failed:', error);
-                throw error;
-            }
-        }
-
-        async function checkIfAlreadyReady() {
-            try {
-                const readyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
-                const snapshot = await get(readyRef);
-                return snapshot.exists();
-            } catch (error) {
-                console.error('Ready check failed:', error);
-                return false;
-            }
+            const disconnectRef = onDisconnect(userRef);
+            await disconnectRef.remove();
         }
 
         function showWaitingScreen() {
@@ -315,14 +247,12 @@
             readyBtn.textContent = 'Регистрация...';
 
             try {
-                // Mark as ready in database
-                const readyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
+                const readyRef = ref(db, `session/ready/${nickname}`);
                 await set(readyRef, {
                     nickname: nickname,
-                    timestamp: Date.now()
+                    timestamp: serverTimestamp()
                 });
 
-                // Auto-remove on disconnect
                 const disconnectRef = onDisconnect(readyRef);
                 await disconnectRef.remove();
 
@@ -337,148 +267,96 @@
         }
 
         function setupListeners() {
-            // Listen to total user count
-            const usersRef = ref(db, 'users');
-            const usersUnsubscribe = onValue(usersRef, handleUsersUpdate, (error) => {
+            // Listen to users
+            const usersRef = ref(db, 'session/users');
+            unsubscribeUsers = onValue(usersRef, handleUsersUpdate, (error) => {
                 console.error('Users listener error:', error);
-                showError('Потеряно соединение с базой данных пользователей');
+                showError('Потеряно соединение с сервером');
             });
 
             // Listen to ready status
-            const readyRef = ref(db, 'ready');
-            const readyUnsubscribe = onValue(readyRef, handleReadyUpdate, (error) => {
+            const readyRef = ref(db, 'session/ready');
+            unsubscribeReady = onValue(readyRef, handleReadyUpdate, (error) => {
                 console.error('Ready listener error:', error);
-                showError('Потеряно соединение с сервером готовности');
+                showError('Потеряно соединение с сервером');
             });
-
-            listeners.push(usersUnsubscribe, readyUnsubscribe);
         }
 
         function handleUsersUpdate(snapshot) {
-            try {
-                if (snapshot.exists()) {
-                    const users = snapshot.val();
-                    const userList = Object.values(users).filter(user =>
-                        user && user.nickname && user.inStarting
-                    );
-
-                    const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
-                    totalUsers = uniqueNicknames.length;
-                    activeUsers = userList.length;
-                } else {
-                    totalUsers = 0;
-                    activeUsers = 0;
-                }
-
-                updateDisplay();
-            } catch (error) {
-                console.error('Handle users update failed:', error);
-                totalUsers = 1; // Fallback to at least current user
-                activeUsers = 1;
-                updateDisplay();
-            }
+            // This just updates the user count context
+            updateDisplay();
         }
 
         function handleReadyUpdate(snapshot) {
-            try {
-                const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
-                const readyCount = readyUsers.length;
-                const currentTotal = Math.max(totalUsers, 1);
+            const readyUsers = snapshot.exists() ? Object.keys(snapshot.val()) : [];
+            const readyCount = readyUsers.length;
 
-                // Prevent too frequent updates
-                const now = Date.now();
-                if (now - lastUpdateTime < 500) return;
-                lastUpdateTime = now;
+            // Get total users in initialization stage
+            const usersRef = ref(db, 'session/users');
+            get(usersRef).then(usersSnapshot => {
+                const totalUsers = usersSnapshot.exists()
+                    ? Object.values(usersSnapshot.val()).filter(user => user.stage === 'initialization').length
+                    : 0;
 
-                // Update UI elements
-                updateReadyStatus(readyUsers, readyCount, currentTotal);
-
-                // Check conditions for proceeding
-                checkProceedConditions(readyCount, currentTotal);
-
-            } catch (error) {
-                console.error('Handle ready update failed:', error);
-            }
+                updateReadyStatus(readyUsers, readyCount, totalUsers);
+                checkProceedConditions(readyCount, totalUsers);
+            });
         }
 
-        function updateReadyStatus(readyUsers, readyCount, currentTotal) {
-            // Update counters
+        function updateReadyStatus(readyUsers, readyCount, totalUsers) {
             document.getElementById('ready-count').textContent = readyCount;
-            document.getElementById('total-count').textContent = currentTotal;
-            document.getElementById('active-count').textContent = activeUsers;
-            document.getElementById('min-required').textContent = CONFIG.MIN_PARTICIPANTS;
+            document.getElementById('total-count').textContent = totalUsers;
 
-            // Update percentage
-            const percentage = currentTotal > 0 ? Math.round((readyCount / currentTotal) * 100) : 0;
+            const percentage = totalUsers > 0 ? Math.round((readyCount / totalUsers) * 100) : 0;
             document.getElementById('ready-percentage').textContent = `(${percentage}%)`;
-
-            // Update progress bar
             document.getElementById('progress-fill').style.width = `${percentage}%`;
 
             // Update user lists
-            updateUserLists(readyUsers, currentTotal);
-        }
+            const userListsElement = document.getElementById('user-lists');
+            userListsElement.innerHTML = '';
 
-        function updateUserLists(readyUsers, currentTotal) {
-            const readyListElement = document.getElementById('ready-list');
-            const notReadyListElement = document.getElementById('not-ready-list');
-
-            readyListElement.innerHTML = '';
-            notReadyListElement.innerHTML = '';
-
-            // Ready users
             if (readyUsers.length > 0) {
-                const readyTitle = document.createElement('div');
-                readyTitle.innerHTML = '<strong>Готовы:</strong>';
-                readyTitle.style.color = '#66ff66';
-                readyTitle.style.marginTop = '15px';
-                readyListElement.appendChild(readyTitle);
+                const readyDiv = document.createElement('div');
+                readyDiv.innerHTML = '<strong style="color: #66ff66;">Готовы:</strong>';
+                userListsElement.appendChild(readyDiv);
 
-                readyUsers.forEach(user => {
+                readyUsers.forEach(name => {
                     const userDiv = document.createElement('div');
                     userDiv.className = 'ready-user';
-                    userDiv.textContent = `✓ ${user.nickname}`;
-                    readyListElement.appendChild(userDiv);
+                    userDiv.textContent = `✓ ${name}`;
+                    userListsElement.appendChild(userDiv);
                 });
             }
 
-            // Show not ready users if we have the information
-            const readyNicknames = readyUsers.map(user => user.nickname);
-            if (currentTotal > readyUsers.length) {
-                const notReadyTitle = document.createElement('div');
-                notReadyTitle.innerHTML = '<strong>Ожидаем:</strong>';
-                notReadyTitle.style.color = '#ffaa66';
-                notReadyTitle.style.marginTop = '15px';
-                notReadyListElement.appendChild(notReadyTitle);
-
-                const waitingCount = currentTotal - readyUsers.length;
+            const waitingCount = totalUsers - readyCount;
+            if (waitingCount > 0) {
                 const waitingDiv = document.createElement('div');
-                waitingDiv.className = 'not-ready-user';
-                waitingDiv.textContent = `⏳ ${waitingCount} участников`;
-                notReadyListElement.appendChild(waitingDiv);
+                waitingDiv.innerHTML = '<strong style="color: #ffaa66; margin-top: 15px; display: block;">Ожидаем:</strong>';
+                userListsElement.appendChild(waitingDiv);
+
+                const countDiv = document.createElement('div');
+                countDiv.className = 'waiting-user';
+                countDiv.textContent = `⏳ ${waitingCount} участников`;
+                userListsElement.appendChild(countDiv);
             }
         }
 
-        function checkProceedConditions(readyCount, currentTotal) {
-            const minReady = Math.max(CONFIG.MIN_PARTICIPANTS, Math.ceil(currentTotal * CONFIG.MIN_READY_RATIO));
-            const canProceed = currentTotal >= CONFIG.MIN_PARTICIPANTS && readyCount >= minReady;
-            const highReadyRatio = readyCount / currentTotal >= CONFIG.HIGH_READY_THRESHOLD;
-
-            // Cancel any existing countdown
+        function checkProceedConditions(readyCount, totalUsers) {
+            // Cancel existing countdown
             if (countdownTimer) {
                 clearInterval(countdownTimer);
                 countdownTimer = null;
                 document.getElementById('countdown-section').classList.add('hidden');
             }
 
-            if (canProceed) {
-                if (readyCount === currentTotal) {
-                    // Everyone is ready - proceed immediately
-                    proceedToNextStage();
-                } else if (highReadyRatio && readyCount >= CONFIG.MIN_PARTICIPANTS) {
-                    // High percentage ready - start countdown
-                    startCountdown();
-                }
+            const readyRatio = totalUsers > 0 ? readyCount / totalUsers : 0;
+
+            if (readyCount === totalUsers && totalUsers >= MIN_PARTICIPANTS) {
+                // Everyone ready - proceed immediately
+                proceedToNextStage();
+            } else if (readyCount >= MIN_PARTICIPANTS && readyRatio >= AUTO_START_THRESHOLD) {
+                // Enough ready - start countdown
+                startCountdown();
             }
         }
 
@@ -519,26 +397,22 @@
         }
 
         function updateDisplay() {
-            // This function can be called to refresh display without ready update
+            // Refresh current display
             const readyCount = parseInt(document.getElementById('ready-count').textContent) || 0;
-            const currentTotal = Math.max(totalUsers, 1);
+            const totalCount = parseInt(document.getElementById('total-count').textContent) || 0;
 
-            document.getElementById('total-count').textContent = currentTotal;
-            document.getElementById('active-count').textContent = activeUsers;
-
-            const percentage = currentTotal > 0 ? Math.round((readyCount / currentTotal) * 100) : 0;
-            document.getElementById('ready-percentage').textContent = `(${percentage}%)`;
-            document.getElementById('progress-fill').style.width = `${percentage}%`;
+            if (totalCount > 0) {
+                const percentage = Math.round((readyCount / totalCount) * 100);
+                document.getElementById('ready-percentage').textContent = `(${percentage}%)`;
+                document.getElementById('progress-fill').style.width = `${percentage}%`;
+            }
         }
 
         function showSection(sectionId) {
             document.querySelectorAll('.section').forEach(section => {
                 section.classList.add('hidden');
             });
-            const targetSection = document.getElementById(sectionId);
-            if (targetSection) {
-                targetSection.classList.remove('hidden');
-            }
+            document.getElementById(sectionId)?.classList.remove('hidden');
         }
 
         function showError(message) {
@@ -553,11 +427,6 @@
 
             // Reset state
             isMarkedReady = false;
-            totalUsers = 0;
-            activeUsers = 0;
-            lastUpdateTime = 0;
-
-            // Cancel any timers
             if (countdownTimer) {
                 clearInterval(countdownTimer);
                 countdownTimer = null;
@@ -575,21 +444,20 @@
         }
 
         function cleanup() {
-            // Clear timers
             if (countdownTimer) {
                 clearInterval(countdownTimer);
                 countdownTimer = null;
             }
 
-            // Clear listeners
-            listeners.forEach(unsubscribe => {
-                try {
-                    unsubscribe?.();
-                } catch (error) {
-                    console.error('Cleanup error:', error);
-                }
-            });
-            listeners = [];
+            if (unsubscribeUsers) {
+                unsubscribeUsers();
+                unsubscribeUsers = null;
+            }
+
+            if (unsubscribeReady) {
+                unsubscribeReady();
+                unsubscribeReady = null;
+            }
         }
 
         // Global functions
