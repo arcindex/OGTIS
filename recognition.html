@@ -238,8 +238,8 @@
         let reconnectAttempts = 0;
         let userListeners = [];
 
-        // Initialize Firebase and nickname
-        function initializeApp() {
+        // Initialize Firebase and nickname - RENAMED FROM initializeApp
+        function initializeGameApp() {
             app = initializeApp(firebaseConfig);
             db = getDatabase(app);
 
@@ -550,9 +550,9 @@
             userListeners.push(unsubscribe);
         }
 
-        // Initialization
+        // Initialization - RENAMED FUNCTION CALL
         async function initialize() {
-            if (!initializeApp()) {
+            if (!initializeGameApp()) {
                 return;
             }
 
