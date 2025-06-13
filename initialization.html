@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Инициализация</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #00ffcc;
+            font-family: 'Courier New', monospace;
+            padding: 40px;
+            line-height: 1.4;
+        }
+
+        .terminal-line {
+            margin-bottom: 1em;
+            white-space: pre-wrap;
+        }
+
+        button {
+            background-color: #00ffcc;
+            color: #000;
+            border: none;
+            padding: 10px 16px;
+            margin: 10px 5px;
+            cursor: pointer;
+            font-weight: bold;
+            border-radius: 4px;
+            font-family: inherit;
+            transition: all 0.2s ease;
+        }
+
+            button:hover {
+                background-color: #00ccaa;
+                transform: translateY(-1px);
+            }
+
+            button:disabled {
+                background-color: #666;
+                color: #999;
+                cursor: not-allowed;
+                transform: none;
+            }
+
+        .section {
+            opacity: 1;
+            transition: opacity 0.4s ease;
+        }
+
+            .section.hidden {
+                opacity: 0;
+                pointer-events: none;
+                position: absolute;
+                top: -9999px;
+            }
+
+        .blinking {
+            animation: blink 1.5s step-start infinite;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+
+        #ready-status {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #00ffcc;
+            border-radius: 5px;
+            background-color: rgba(0, 255, 204, 0.05);
+        }
+
+        .error-message {
+            color: #ff6666;
+            border: 1px solid #ff6666;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background-color: rgba(255, 102, 102, 0.1);
+        }
+
+        .success-message {
+            color: #66ff66;
+            border: 1px solid #66ff66;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background-color: rgba(102, 255, 102, 0.1);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: #00ffcc;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+            .connection-status.online {
+                background-color: rgba(102, 255, 102, 0.2);
+                color: #66ff66;
+                border: 1px solid #66ff66;
+            }
+
+            .connection-status.offline {
+                background-color: rgba(255, 102, 102, 0.2);
+                color: #ff6666;
+                border: 1px solid #ff6666;
+            }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 20px;
+                font-size: 14px;
+            }
+
+            button {
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="intro-section" class="section">
+        <div class="terminal-line">Выявим вместе... кто вы...</div>
+        <div class="terminal-line">Система восстановления памяти готова к инициализации.</div>
+        <div class="terminal-line">Нажмите готов, когда будете готовы начать процесс.</div>
+        <button onclick="markReady()" id="ready-btn">Готов начать</button>
+    </div>
+
+    <div id="waiting" class="section hidden">
+        <div class="terminal-line">Инициализация системы восстановления памяти...</div>
+        <div class="terminal-line">Ожидание синхронизации с другими узлами<span class="blinking">...</span></div>
+        <div id="ready-status">
+            <div>Готовы к запуску: <span id="ready-count">0</span>/<span id="total-count">0</span></div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+            <div id="ready-list"></div>
+        </div>
+    </div>
+
+    <div id="error-section" class="section hidden">
+        <div class="error-message">
+            <div class="terminal-line" id="error-text">Ошибка подключения к системе...</div>
+            <div class="terminal-line">Проверьте подключение к сети и попробуйте снова</div>
+            <button onclick="reconnect()" id="reconnect-btn">Попробовать снова</button>
+        </div>
+    </div>
+
+    <div id="success-section" class="section hidden">
+        <div class="success-message">
+            <div class="terminal-line">Все участники готовы!</div>
+            <div class="terminal-line">Переход к следующему этапу<span class="blinking">...</span></div>
+        </div>
+    </div>
+
+    <div class="connection-status" id="connection-status">Подключение...</div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
+        import { getDatabase, ref, onValue, set, get, remove, onDisconnect, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
+            authDomain: "ogtis-e2e4b.firebaseapp.com",
+            projectId: "ogtis-e2e4b",
+            storageBucket: "ogtis-e2e4b.appspot.com",
+            messagingSenderId: "8188688236",
+            appId: "1:8188688236:web:ca6e4cf0e707a4ac9e6549",
+            databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
+        };
+
+        const CONFIG = {
+            MIN_PARTICIPANTS: 3,
+            READY_THRESHOLD: 0.6,
+            TRANSITION_DELAY: 3000,
+            RECONNECT_INTERVAL: 5000
+        };
+
+        let app, db;
+        let nickname = '';
+        let allUsers = new Set();
+        let isReady = false;
+        let userListeners = [];
+        let userKey = null;
+        let reconnectAttempts = 0;
+
+        function initializeGameApp() {
+            app = initializeApp(firebaseConfig);
+            db = getDatabase(app);
+
+            const urlParams = new URLSearchParams(window.location.search);
+            nickname = urlParams.get("nickname") || `Guest_${Date.now()}`;
+
+            if (!nickname || nickname.length < 2) {
+                showError('Неверный никнейм. Пожалуйста, вернитесь на главную страницу.');
+                return false;
+            }
+            return true;
+        }
+
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.add('hidden');
+            });
+            const targetSection = document.getElementById(sectionId);
+            if (targetSection) {
+                targetSection.classList.remove('hidden');
+            }
+        }
+
+        function showError(message = 'Произошла ошибка подключения') {
+            document.getElementById('error-text').textContent = message;
+            showSection('error-section');
+            updateConnectionStatus('offline');
+        }
+
+        function updateConnectionStatus(status) {
+            const statusElement = document.getElementById('connection-status');
+            statusElement.className = `connection-status ${status}`;
+            statusElement.textContent = status === 'online' ? 'Онлайн' : 'Офлайн';
+        }
+
+        async function findUserKey() {
+            try {
+                const usersRef = ref(db, 'users');
+                const snapshot = await get(usersRef);
+
+                if (snapshot.exists()) {
+                    const users = snapshot.val();
+                    for (const [key, userData] of Object.entries(users)) {
+                        if (userData.nickname === nickname) {
+                            userKey = key;
+                            return key;
+                        }
+                    }
+                }
+                return null;
+            } catch (error) {
+                console.error('Error finding user key:', error);
+                return null;
+            }
+        }
+
+        async function updateUserStatus() {
+            try {
+                if (!userKey) {
+                    userKey = await findUserKey();
+                }
+
+                if (userKey) {
+                    const userRef = ref(db, 'users/' + userKey);
+                    await update(userRef, {
+                        lastSeen: Date.now(),
+                        inStarting: true
+                    });
+
+                    const disconnectRef = onDisconnect(userRef);
+                    await disconnectRef.update({
+                        inStarting: false
+                    });
+
+                    updateConnectionStatus('online');
+                    return true;
+                } else {
+                    throw new Error('User not found in database');
+                }
+            } catch (error) {
+                console.error('Status update failed:', error);
+                updateConnectionStatus('offline');
+                return false;
+            }
+        }
+
+        async function checkExistingProgress() {
+            try {
+                const readyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
+                const snapshot = await get(readyRef);
+                if (snapshot.exists()) {
+                    showWaitingScreen();
+                    return true;
+                }
+                return false;
+            } catch (error) {
+                console.error('Progress check failed:', error);
+                return false;
+            }
+        }
+
+        function showWaitingScreen() {
+            isReady = true;
+            showSection('waiting');
+            updateWaitingStatus();
+            setupUserCountListener();
+        }
+
+        async function markReady() {
+            const readyBtn = document.getElementById('ready-btn');
+            readyBtn.disabled = true;
+            readyBtn.textContent = 'Регистрация...';
+
+            try {
+                showWaitingScreen();
+
+                const userKeyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
+                await set(userKeyRef, {
+                    nickname: nickname,
+                    timestamp: Date.now()
+                });
+
+                const disconnectRef = onDisconnect(userKeyRef);
+                await disconnectRef.remove();
+
+            } catch (error) {
+                console.error('Mark ready failed:', error);
+                readyBtn.disabled = false;
+                readyBtn.textContent = 'Готов начать';
+                showError('Не удалось зарегистрировать готовность. Попробуйте снова.');
+            }
+        }
+
+        function setupUserCountListener() {
+            const usersRef = ref(db, 'users');
+            const unsubscribe = onValue(usersRef, (snapshot) => {
+                try {
+                    if (snapshot.exists()) {
+                        const users = snapshot.val();
+                        const userList = Object.values(users);
+                        const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
+                        allUsers = new Set(uniqueNicknames);
+                    }
+                } catch (error) {
+                    console.error('User count update error:', error);
+                }
+            });
+
+            userListeners.push(unsubscribe);
+        }
+
+        function updateWaitingStatus() {
+            const readyRef = ref(db, 'ready');
+            const unsubscribe = onValue(readyRef, snapshot => {
+                try {
+                    const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
+                    const readyCount = readyUsers.length;
+                    const totalCount = Math.max(allUsers.size, 1);
+                    const progress = (readyCount / totalCount) * 100;
+
+                    document.getElementById('ready-count').textContent = readyCount;
+                    document.getElementById('total-count').textContent = totalCount;
+                    document.getElementById('progress-fill').style.width = `${progress}%`;
+
+                    const readyListElement = document.getElementById('ready-list');
+                    readyListElement.innerHTML = readyUsers
+                        .map(user => `✓ ${user.nickname}`)
+                        .join('<br>');
+
+                    const minReadyCount = Math.max(CONFIG.MIN_PARTICIPANTS,
+                        Math.ceil(totalCount * CONFIG.READY_THRESHOLD));
+
+                    console.log('Ready status:', {
+                        readyCount,
+                        totalCount,
+                        minReadyCount,
+                        threshold: CONFIG.READY_THRESHOLD
+                    });
+
+                    if (totalCount >= CONFIG.MIN_PARTICIPANTS && readyCount >= minReadyCount) {
+                        showSection('success-section');
+                        setTimeout(() => {
+                            const nextStageUrl = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
+                            console.log('Navigating to:', nextStageUrl);
+                            // Uncomment when stage1.html is ready:
+                            // window.location.href = nextStageUrl;
+                        }, CONFIG.TRANSITION_DELAY);
+                    }
+                } catch (error) {
+                    console.error('Status update error:', error);
+                }
+            }, error => {
+                console.error('Ready listener error:', error);
+            });
+
+            userListeners.push(unsubscribe);
+        }
+
+        async function reconnect() {
+            const reconnectBtn = document.getElementById('reconnect-btn');
+            reconnectBtn.disabled = true;
+            reconnectBtn.textContent = 'Переподключение...';
+
+            reconnectAttempts++;
+
+            try {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                const success = await updateUserStatus();
+
+                if (success) {
+                    const hasProgress = await checkExistingProgress();
+                    if (!hasProgress) {
+                        showSection('intro-section');
+                    }
+                } else {
+                    throw new Error('Status update failed');
+                }
+            } catch (error) {
+                console.error('Reconnection failed:', error);
+
+                reconnectBtn.disabled = false;
+                reconnectBtn.textContent = 'Попробовать снова';
+
+                if (reconnectAttempts < 3) {
+                    setTimeout(reconnect, CONFIG.RECONNECT_INTERVAL);
+                }
+            }
+        }
+
+        async function initialize() {
+            if (!initializeGameApp()) {
+                return;
+            }
+
+            try {
+                const statusUpdated = await updateUserStatus();
+                if (!statusUpdated) {
+                    throw new Error('Failed to update user status');
+                }
+
+                const hasProgress = await checkExistingProgress();
+                if (!hasProgress) {
+                    showSection('intro-section');
+                }
+
+            } catch (error) {
+                console.error('Initialization failed:', error);
+                showError();
+            }
+        }
+
+        function cleanup() {
+            userListeners.forEach(unsubscribe => {
+                if (typeof unsubscribe === 'function') {
+                    unsubscribe();
+                }
+            });
+            userListeners = [];
+        }
+
+        window.addEventListener('beforeunload', cleanup);
+        window.addEventListener('load', initialize);
+
+        window.markReady = markReady;
+        window.reconnect = reconnect;
+    </script>
+</body>
+</html>

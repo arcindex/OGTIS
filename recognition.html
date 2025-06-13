@@ -1,9 +1,8 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Другие</title>
+    <title>Другие...?</title>
     <style>
         body {
             background-color: #000;
@@ -65,14 +64,6 @@
             }
         }
 
-        #ready-status {
-            margin-top: 20px;
-            padding: 15px;
-            border: 1px solid #00ffcc;
-            border-radius: 5px;
-            background-color: rgba(0, 255, 204, 0.05);
-        }
-
         .error-message {
             color: #ff6666;
             border: 1px solid #ff6666;
@@ -82,63 +73,12 @@
             background-color: rgba(255, 102, 102, 0.1);
         }
 
-        .success-message {
-            color: #66ff66;
-            border: 1px solid #66ff66;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 5px;
-            background-color: rgba(102, 255, 102, 0.1);
-        }
-
-        .loading {
-            color: #ffcc00;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 20px;
-            background-color: #333;
-            border-radius: 10px;
-            overflow: hidden;
-            margin: 10px 0;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background-color: #00ffcc;
-            transition: width 0.3s ease;
-            border-radius: 10px;
-        }
-
         .user-list {
             margin: 10px 0;
             padding: 10px;
             border-left: 3px solid #00ffcc;
             padding-left: 15px;
         }
-
-        .connection-status {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 5px 10px;
-            border-radius: 15px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-            .connection-status.online {
-                background-color: rgba(102, 255, 102, 0.2);
-                color: #66ff66;
-                border: 1px solid #66ff66;
-            }
-
-            .connection-status.offline {
-                background-color: rgba(255, 102, 102, 0.2);
-                color: #ff6666;
-                border: 1px solid #ff6666;
-            }
 
         @media (max-width: 768px) {
             body {
@@ -171,19 +111,7 @@
         <div class="terminal-line">Я пройдусь по каждому из вас...</div>
         <div class="terminal-line">Вы вместе пройдёте весь путь...</div>
         <div class="terminal-line">Выявим вместе... кто вы...</div>
-        <button onclick="markReady()" id="ready-btn">Готов начать</button>
-    </div>
-
-    <div id="waiting" class="section hidden">
-        <div class="terminal-line">Инициализация системы восстановления памяти...</div>
-        <div class="terminal-line">Ожидание синхронизации с другими узлами<span class="blinking">...</span></div>
-        <div id="ready-status">
-            <div>Готовы к запуску: <span id="ready-count">0</span>/<span id="total-count">0</span></div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
-            </div>
-            <div id="ready-list"></div>
-        </div>
+        <button onclick="proceedToStart()" id="proceed-btn">Перейти к подготовке</button>
     </div>
 
     <div id="error-section" class="section hidden">
@@ -194,18 +122,10 @@
         </div>
     </div>
 
-    <div id="success-section" class="section hidden">
-        <div class="success-message">
-            <div class="terminal-line">Все участники готовы!</div>
-            <div class="terminal-line">Переход к следующему этапу<span class="blinking">...</span></div>
-        </div>
-    </div>
-
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, remove, onDisconnect, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, onDisconnect, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
-        // Your Firebase config (keep it as is for chat friends)
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
             authDomain: "ogtis-e2e4b.firebaseapp.com",
@@ -216,27 +136,20 @@
             databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
         };
 
-        // Configuration
         const CONFIG = {
-            MIN_PARTICIPANTS: 3, // Minimum 3 players to show question
-            READY_THRESHOLD: 0.6, // 60% of players need to be ready
+            MIN_PARTICIPANTS: 3,
             TYPING_SPEED: 50,
-            TRANSITION_DELAY: 3000,
             RECONNECT_INTERVAL: 5000
         };
 
-        // Global state
         let app, db;
         let nickname = '';
         let allUsers = new Set();
-        let isReady = false;
         let hasShownQuestion = false;
-        let connectionStatus = 'connecting';
-        let reconnectAttempts = 0;
         let userListeners = [];
-        let userKey = null; // Store the user's key from index.html
+        let userKey = null;
+        let hasAnswered = false;
 
-        // Initialize Firebase and nickname
         function initializeGameApp() {
             app = initializeApp(firebaseConfig);
             db = getDatabase(app);
@@ -251,7 +164,6 @@
             return true;
         }
 
-        // UI Animation functions
         function addLineAnimated(container, html) {
             return new Promise(resolve => {
                 const line = document.createElement("div");
@@ -290,7 +202,6 @@
             showSection('error-section');
         }
 
-        // Firebase functions - Updated to not duplicate registration
         async function findUserKey() {
             try {
                 const usersRef = ref(db, 'users');
@@ -298,7 +209,6 @@
 
                 if (snapshot.exists()) {
                     const users = snapshot.val();
-                    // Find the user key by nickname
                     for (const [key, userData] of Object.entries(users)) {
                         if (userData.nickname === nickname) {
                             userKey = key;
@@ -326,7 +236,6 @@
                         inRecognition: true
                     });
 
-                    // Set up automatic cleanup on disconnect
                     const disconnectRef = onDisconnect(userRef);
                     await disconnectRef.update({
                         inRecognition: false
@@ -338,21 +247,6 @@
                 }
             } catch (error) {
                 console.error('Status update failed:', error);
-                return false;
-            }
-        }
-
-        async function checkExistingProgress() {
-            try {
-                const readyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
-                const snapshot = await get(readyRef);
-                if (snapshot.exists()) {
-                    showWaitingScreen();
-                    return true;
-                }
-                return false;
-            } catch (error) {
-                console.error('Progress check failed:', error);
                 return false;
             }
         }
@@ -369,10 +263,8 @@
             const userListElement = document.getElementById('user-list');
             userListElement.innerHTML = "";
 
-            // Only show question if we have at least MIN_PARTICIPANTS total players
             const totalPlayers = uniqueNicknames.length;
 
-            // Reset question state if not enough participants
             if (!hasShownQuestion || totalPlayers < CONFIG.MIN_PARTICIPANTS) {
                 document.getElementById('question').classList.add("hidden");
                 if (totalPlayers < CONFIG.MIN_PARTICIPANTS) {
@@ -394,8 +286,7 @@
                     await addLineAnimated(listContainer, `→ ${name}`);
                 }
 
-                // Show question only if we have at least MIN_PARTICIPANTS total players
-                if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasShownQuestion && !isReady) {
+                if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasShownQuestion && !hasAnswered) {
                     hasShownQuestion = true;
                     await new Promise(resolve => setTimeout(resolve, 1500));
                     document.getElementById('question').classList.remove("hidden");
@@ -403,8 +294,8 @@
             }
         }
 
-        // Quest logic functions
         function answer(recognize) {
+            hasAnswered = true;
             const yesBtn = document.getElementById('yes-btn');
             const noBtn = document.getElementById('no-btn');
 
@@ -420,84 +311,8 @@
             document.getElementById("answer-text").textContent = answerText;
         }
 
-        function showWaitingScreen() {
-            isReady = true;
-            showSection('waiting');
-            updateWaitingStatus();
-        }
-
-        async function markReady() {
-            const readyBtn = document.getElementById('ready-btn');
-            readyBtn.disabled = true;
-            readyBtn.textContent = 'Регистрация...';
-
-            try {
-                showWaitingScreen();
-
-                const userKeyRef = ref(db, 'ready/' + encodeURIComponent(nickname));
-                await set(userKeyRef, {
-                    nickname: nickname,
-                    timestamp: Date.now()
-                });
-
-                // Set up disconnect cleanup for ready status too
-                const disconnectRef = onDisconnect(userKeyRef);
-                await disconnectRef.remove();
-
-            } catch (error) {
-                console.error('Mark ready failed:', error);
-                readyBtn.disabled = false;
-                readyBtn.textContent = 'Готов начать';
-                showError('Не удалось зарегистрировать готовность. Попробуйте снова.');
-            }
-        }
-
-        function updateWaitingStatus() {
-            const readyRef = ref(db, 'ready');
-            const unsubscribe = onValue(readyRef, snapshot => {
-                try {
-                    const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
-                    const readyCount = readyUsers.length;
-                    const totalCount = Math.max(allUsers.size, 1);
-                    const progress = (readyCount / totalCount) * 100;
-
-                    document.getElementById('ready-count').textContent = readyCount;
-                    document.getElementById('total-count').textContent = totalCount;
-                    document.getElementById('progress-fill').style.width = `${progress}%`;
-
-                    const readyListElement = document.getElementById('ready-list');
-                    readyListElement.innerHTML = readyUsers
-                        .map(user => `✓ ${user.nickname}`)
-                        .join('<br>');
-
-                    // Improved threshold logic
-                    const minReadyCount = Math.max(CONFIG.MIN_PARTICIPANTS,
-                        Math.ceil(totalCount * CONFIG.READY_THRESHOLD));
-
-                    console.log('Ready status:', {
-                        readyCount,
-                        totalCount,
-                        minReadyCount,
-                        threshold: CONFIG.READY_THRESHOLD
-                    });
-
-                    if (totalCount >= CONFIG.MIN_PARTICIPANTS && readyCount >= minReadyCount) {
-                        showSection('success-section');
-                        setTimeout(() => {
-                            const nextStageUrl = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
-                            console.log('Navigating to:', nextStageUrl);
-                            // Uncomment when stage1.html is ready:
-                            // window.location.href = nextStageUrl;
-                        }, CONFIG.TRANSITION_DELAY);
-                    }
-                } catch (error) {
-                    console.error('Status update error:', error);
-                }
-            }, error => {
-                console.error('Ready listener error:', error);
-            });
-
-            userListeners.push(unsubscribe);
+        function proceedToStart() {
+            window.location.href = `initialization.html?nickname=${encodeURIComponent(nickname)}`;
         }
 
         async function reconnect() {
@@ -505,30 +320,20 @@
             reconnectBtn.disabled = true;
             reconnectBtn.textContent = 'Переподключение...';
 
-            reconnectAttempts++;
-
             try {
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 const success = await updateUserStatus();
 
                 if (success) {
-                    const hasProgress = await checkExistingProgress();
-                    if (!hasProgress) {
-                        showSection('user-list-section');
-                        setupUserListener();
-                    }
+                    showSection('user-list-section');
+                    setupUserListener();
                 } else {
                     throw new Error('Status update failed');
                 }
             } catch (error) {
                 console.error('Reconnection failed:', error);
-
                 reconnectBtn.disabled = false;
                 reconnectBtn.textContent = 'Попробовать снова';
-
-                if (reconnectAttempts < 3) {
-                    setTimeout(reconnect, CONFIG.RECONNECT_INTERVAL);
-                }
             }
         }
 
@@ -538,14 +343,7 @@
                 try {
                     if (snapshot.exists()) {
                         const users = snapshot.val();
-                        if (!isReady) {
-                            await displayUsers(users);
-                        } else {
-                            // Update user count for ready screen
-                            const userList = Object.values(users);
-                            const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
-                            allUsers = new Set(uniqueNicknames);
-                        }
+                        await displayUsers(users);
                     }
                 } catch (error) {
                     console.error('User data processing error:', error);
@@ -558,7 +356,6 @@
             userListeners.push(unsubscribe);
         }
 
-        // Initialization
         async function initialize() {
             if (!initializeGameApp()) {
                 return;
@@ -570,11 +367,8 @@
                     throw new Error('Failed to update user status');
                 }
 
-                const hasProgress = await checkExistingProgress();
-                if (!hasProgress) {
-                    showSection('user-list-section');
-                    setupUserListener();
-                }
+                showSection('user-list-section');
+                setupUserListener();
 
             } catch (error) {
                 console.error('Initialization failed:', error);
@@ -582,7 +376,6 @@
             }
         }
 
-        // Cleanup function
         function cleanup() {
             userListeners.forEach(unsubscribe => {
                 if (typeof unsubscribe === 'function') {
@@ -592,13 +385,11 @@
             userListeners = [];
         }
 
-        // Event listeners
         window.addEventListener('beforeunload', cleanup);
         window.addEventListener('load', initialize);
 
-        // Global functions for buttons
         window.answer = answer;
-        window.markReady = markReady;
+        window.proceedToStart = proceedToStart;
         window.reconnect = reconnect;
     </script>
 </body>
