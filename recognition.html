@@ -139,6 +139,12 @@
                 border: 1px solid #ff6666;
             }
 
+        .player-count {
+            color: #ffcc00;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
         @media (max-width: 768px) {
             body {
                 padding: 20px;
@@ -204,7 +210,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
         import { getDatabase, ref, onValue, set, get, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
-        // Your Firebase config (keep it as is for chat friends)
+        // Your Firebase config
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
             authDomain: "ogtis-e2e4b.firebaseapp.com",
@@ -217,8 +223,8 @@
 
         // Configuration
         const CONFIG = {
-            MIN_PARTICIPANTS: 3, // Changed to 3 so buttons show only when 3+ players
-            READY_THRESHOLD: 0.6, // 60% instead of 70%
+            MIN_PARTICIPANTS: 3, // Minimum 3 players total to show question
+            READY_THRESHOLD: 0.6, // 60% ready to proceed
             TYPING_SPEED: 50,
             TRANSITION_DELAY: 3000,
             RECONNECT_INTERVAL: 5000
@@ -234,7 +240,7 @@
         let reconnectAttempts = 0;
         let userListeners = [];
 
-        // Initialize Firebase and nickname - RENAMED FROM initializeApp
+        // Initialize Firebase and nickname
         function initializeGameApp() {
             app = initializeApp(firebaseConfig);
             db = getDatabase(app);
@@ -248,8 +254,6 @@
             }
             return true;
         }
-
-        // Connection status management - REMOVED updateConnectionStatus function
 
         // UI Animation functions
         function addLineAnimated(container, html) {
@@ -332,23 +336,25 @@
             const userList = Object.values(users);
             const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
             const others = uniqueNicknames.filter(name => name !== nickname);
+            const totalPlayers = uniqueNicknames.length; // Total including current player
 
             allUsers = new Set(uniqueNicknames);
 
             const userListElement = document.getElementById('user-list');
             userListElement.innerHTML = "";
 
-            // Reset question state if not enough participants
-            if (!hasShownQuestion || others.length < CONFIG.MIN_PARTICIPANTS - 1) {
+            console.log(`Debug: Total players: ${totalPlayers}, Others: ${others.length}, Min required: ${CONFIG.MIN_PARTICIPANTS}`);
+
+            // Hide question if not enough total players
+            if (totalPlayers < CONFIG.MIN_PARTICIPANTS) {
                 document.getElementById('question').classList.add("hidden");
-                if (others.length < CONFIG.MIN_PARTICIPANTS - 1) {
-                    hasShownQuestion = false;
-                }
+                hasShownQuestion = false;
             }
 
             if (others.length === 0) {
                 await addLineAnimated(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
                 await addLineAnimated(userListElement, `Ожидаем других участников<span class="blinking">...</span>`);
+                await addLineAnimated(userListElement, `<div class="player-count">Игроков: ${totalPlayers}/${CONFIG.MIN_PARTICIPANTS}</div>`);
             } else {
                 await addLineAnimated(userListElement, `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`);
 
@@ -360,11 +366,17 @@
                     await addLineAnimated(listContainer, `→ ${name}`);
                 }
 
-                // Show question if enough participants and not shown before
-                if (others.length >= CONFIG.MIN_PARTICIPANTS - 1 && !hasShownQuestion && !isReady) {
+                // Add player count
+                await addLineAnimated(userListElement, `<div class="player-count">Игроков: ${totalPlayers}/${CONFIG.MIN_PARTICIPANTS}</div>`);
+
+                // Show question ONLY if we have enough total players AND haven't shown it AND user isn't ready
+                if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasShownQuestion && !isReady) {
+                    console.log('Showing question - conditions met');
                     hasShownQuestion = true;
                     await new Promise(resolve => setTimeout(resolve, 1500));
                     document.getElementById('question').classList.remove("hidden");
+                } else {
+                    console.log(`Question not shown: totalPlayers=${totalPlayers}, hasShownQuestion=${hasShownQuestion}, isReady=${isReady}`);
                 }
             }
         }
@@ -524,7 +536,7 @@
             userListeners.push(unsubscribe);
         }
 
-        // Initialization - RENAMED FUNCTION CALL
+        // Initialization
         async function initialize() {
             if (!initializeGameApp()) {
                 return;
