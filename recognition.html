@@ -153,10 +153,6 @@
     </style>
 </head>
 <body>
-    <div class="connection-status" id="connection-status">
-        <span class="blinking">Подключение...</span>
-    </div>
-
     <div id="user-list-section" class="section">
         <div id="user-list"></div>
 
@@ -221,7 +217,7 @@
 
         // Configuration
         const CONFIG = {
-            MIN_PARTICIPANTS: 2,
+            MIN_PARTICIPANTS: 3, // Changed to 3 so buttons show only when 3+ players
             READY_THRESHOLD: 0.6, // 60% instead of 70%
             TYPING_SPEED: 50,
             TRANSITION_DELAY: 3000,
@@ -253,23 +249,7 @@
             return true;
         }
 
-        // Connection status management
-        function updateConnectionStatus(status) {
-            connectionStatus = status;
-            const statusElement = document.getElementById('connection-status');
-
-            if (status === 'online') {
-                statusElement.textContent = 'Онлайн';
-                statusElement.className = 'connection-status online';
-                reconnectAttempts = 0;
-            } else if (status === 'offline') {
-                statusElement.textContent = 'Не в сети';
-                statusElement.className = 'connection-status offline';
-            } else {
-                statusElement.innerHTML = '<span class="blinking">Подключение...</span>';
-                statusElement.className = 'connection-status';
-            }
-        }
+        // Connection status management - REMOVED updateConnectionStatus function
 
         // UI Animation functions
         function addLineAnimated(container, html) {
@@ -324,11 +304,9 @@
                 const disconnectRef = onDisconnect(userRef);
                 await disconnectRef.remove();
 
-                updateConnectionStatus('online');
                 return true;
             } catch (error) {
                 console.error('Registration failed:', error);
-                updateConnectionStatus('offline');
                 return false;
             }
         }
@@ -483,7 +461,6 @@
                 }
             }, error => {
                 console.error('Ready listener error:', error);
-                updateConnectionStatus('offline');
             });
 
             userListeners.push(unsubscribe);
@@ -495,7 +472,6 @@
             reconnectBtn.textContent = 'Переподключение...';
 
             reconnectAttempts++;
-            updateConnectionStatus('connecting');
 
             try {
                 await new Promise(resolve => setTimeout(resolve, 1000));
@@ -512,7 +488,6 @@
                 }
             } catch (error) {
                 console.error('Reconnection failed:', error);
-                updateConnectionStatus('offline');
 
                 reconnectBtn.disabled = false;
                 reconnectBtn.textContent = 'Попробовать снова';
@@ -543,7 +518,6 @@
                 }
             }, (error) => {
                 console.error('User listener error:', error);
-                updateConnectionStatus('offline');
                 showError();
             });
 
@@ -557,8 +531,6 @@
             }
 
             try {
-                updateConnectionStatus('connecting');
-
                 const registered = await registerUser();
                 if (!registered) {
                     throw new Error('Failed to register user');
