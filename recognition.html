@@ -5,80 +5,47 @@
     <title>Другие...?</title>
     <style>
         body {
-            background: linear-gradient(135deg, #000 0%, #001a1a 100%);
+            background-color: #000;
             color: #00ffcc;
             font-family: 'Courier New', monospace;
             padding: 40px;
             line-height: 1.6;
             min-height: 100vh;
-            overflow-x: hidden;
         }
 
         .terminal-line {
             margin-bottom: 1em;
             white-space: pre-wrap;
-            animation: fadeIn 0.8s ease-in;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
         }
 
         button {
-            background: linear-gradient(45deg, #00ffcc, #00ccaa);
+            background-color: #00ffcc;
             color: #000;
             border: none;
-            padding: 12px 20px;
-            margin: 15px 8px;
+            padding: 8px 12px;
+            margin: 10px 5px;
             cursor: pointer;
             font-weight: bold;
-            border-radius: 6px;
             font-family: inherit;
-            font-size: 14px;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0, 255, 204, 0.3);
         }
 
-            button:hover {
-                background: linear-gradient(45deg, #00ccaa, #009988);
-                transform: translateY(-2px);
-                box-shadow: 0 6px 20px rgba(0, 255, 204, 0.4);
-            }
-
-            button:active {
-                transform: translateY(0);
-            }
-
             button:disabled {
-                background: #333;
+                background-color: #333;
                 color: #666;
                 cursor: not-allowed;
-                transform: none;
-                box-shadow: none;
             }
 
         .section {
-            opacity: 1;
-            transition: opacity 0.6s ease;
+            display: block;
         }
 
             .section.hidden {
-                opacity: 0;
-                pointer-events: none;
-                position: absolute;
-                top: -9999px;
+                display: none;
             }
 
-        .blinking {
-            animation: blink 1.5s step-start infinite;
+        .blinking::after {
+            content: "_";
+            animation: blink 1s infinite;
         }
 
         @keyframes blink {
@@ -89,74 +56,26 @@
 
         .error-message {
             color: #ff6666;
-            border: 2px solid #ff6666;
-            padding: 20px;
-            margin: 15px 0;
-            border-radius: 8px;
-            background: rgba(255, 102, 102, 0.1);
-            backdrop-filter: blur(5px);
+            border: 1px solid #ff6666;
+            padding: 15px;
+            margin: 10px 0;
         }
 
         .user-list {
-            margin: 15px 0;
-            padding: 20px;
-            border-left: 4px solid #00ffcc;
+            margin: 10px 0;
             padding-left: 20px;
-            background: rgba(0, 255, 204, 0.05);
-            border-radius: 0 8px 8px 0;
-        }
-
-        .connection-indicator {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #00ffcc;
-            box-shadow: 0 0 10px #00ffcc;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-
-            50% {
-                opacity: 0.5;
-            }
         }
 
         .question-container {
-            background: rgba(0, 255, 204, 0.1);
-            border: 1px solid #00ffcc;
-            border-radius: 8px;
-            padding: 20px;
             margin: 20px 0;
-            text-align: center;
-        }
-
-        @media (max-width: 768px) {
-            body {
-                padding: 20px;
-                font-size: 14px;
-            }
-
-            button {
-                padding: 10px 16px;
-                font-size: 13px;
-                margin: 10px 5px;
-            }
+            padding: 15px;
+            border: 1px solid #00ffcc;
         }
     </style>
 </head>
 <body>
-    <div class="connection-indicator"></div>
-
     <div id="user-list-section" class="section">
         <div id="user-list"></div>
-
         <div id="question" class="hidden">
             <div class="question-container">
                 <div class="terminal-line">Ты узнаёшь их?</div>
@@ -199,44 +118,39 @@
         };
 
         const CONFIG = {
-            MIN_PARTICIPANTS: 3,
-            TYPING_SPEED: 40,
-            RECONNECT_DELAY: 2000
+            MIN_PARTICIPANTS: 3
         };
 
         let app, db, nickname, userKey;
-        let allUsers = new Set();
-        let hasShownQuestion = false;
         let hasAnswered = false;
+        let currentUsers = new Set();
         let listeners = [];
 
-        function initialize() {
-            app = initializeApp(firebaseConfig);
-            db = getDatabase(app);
-
-            const urlParams = new URLSearchParams(window.location.search);
-            nickname = urlParams.get("nickname");
-
-            if (!nickname?.trim()) {
-                showError('Неверный никнейм. Вернитесь на главную страницу.');
-                return;
-            }
-
-            findUserAndSetup();
-        }
-
-        async function findUserAndSetup() {
+        async function initialize() {
             try {
+                app = initializeApp(firebaseConfig);
+                db = getDatabase(app);
+
+                const urlParams = new URLSearchParams(window.location.search);
+                nickname = urlParams.get("nickname");
+
+                if (!nickname?.trim()) {
+                    showError('Неверный никнейм. Вернитесь на главную страницу.');
+                    return;
+                }
+
                 userKey = await findUserKey();
                 if (!userKey) {
-                    throw new Error('Пользователь не найден');
+                    showError('Пользователь не найден в системе.');
+                    return;
                 }
 
                 await updateUserStatus();
                 setupListeners();
                 showSection('user-list-section');
+
             } catch (error) {
-                console.error('Setup failed:', error);
+                console.error('Initialization failed:', error);
                 showError('Не удалось подключиться к системе');
             }
         }
@@ -269,11 +183,14 @@
 
         function setupListeners() {
             const usersRef = ref(db, 'users');
-            const unsubscribe = onValue(usersRef, handleUsersUpdate, handleError);
+            const unsubscribe = onValue(usersRef, handleUsersUpdate, (error) => {
+                console.error('Database error:', error);
+                showError('Потеряно соединение с сервером');
+            });
             listeners.push(unsubscribe);
         }
 
-        async function handleUsersUpdate(snapshot) {
+        function handleUsersUpdate(snapshot) {
             if (!snapshot.exists()) return;
 
             const users = snapshot.val();
@@ -281,71 +198,48 @@
             const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
             const others = uniqueNicknames.filter(name => name !== nickname);
 
-            allUsers = new Set(uniqueNicknames);
-            await displayUsers(others, uniqueNicknames.length);
+            currentUsers = new Set(uniqueNicknames);
+            displayUsers(others, uniqueNicknames.length);
         }
 
-        function handleError(error) {
-            console.error('Listener error:', error);
-            showError('Потеряно соединение с сервером');
-        }
-
-        async function displayUsers(others, totalPlayers) {
+        function displayUsers(others, totalPlayers) {
             const userListElement = document.getElementById('user-list');
             userListElement.innerHTML = "";
 
-            // Hide question if not enough players
-            if (totalPlayers < CONFIG.MIN_PARTICIPANTS) {
-                document.getElementById('question').classList.add("hidden");
-                hasShownQuestion = false;
+            // Always hide question if not enough players or already answered
+            const questionElement = document.getElementById('question');
+            if (totalPlayers < CONFIG.MIN_PARTICIPANTS || hasAnswered) {
+                questionElement.classList.add("hidden");
             }
 
             if (others.length === 0) {
-                await addAnimatedLine(userListElement, `Ты пока здесь один, <strong>${nickname}</strong>...`);
-                await addAnimatedLine(userListElement, `Ожидаем других участников<span class="blinking">...</span>`);
+                addLine(userListElement, `Ты пока здесь один, ${nickname}...`);
+                addLine(userListElement, `Ожидаем других участников<span class="blinking"></span>`);
             } else {
-                await addAnimatedLine(userListElement, `<strong>${nickname}</strong>, смотри, кто-то ещё зашёл:`);
+                addLine(userListElement, `${nickname}, смотри, кто-то ещё зашёл:`);
 
                 const listContainer = document.createElement('div');
                 listContainer.className = 'user-list';
                 userListElement.appendChild(listContainer);
 
-                for (const name of others) {
-                    await addAnimatedLine(listContainer, `→ ${name}`);
-                }
+                others.forEach(name => {
+                    addLine(listContainer, `→ ${name}`);
+                });
 
-                // Show question when enough players and not answered yet
-                if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasShownQuestion && !hasAnswered) {
-                    hasShownQuestion = true;
+                // Show question only when conditions are met
+                if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasAnswered) {
                     setTimeout(() => {
-                        document.getElementById('question').classList.remove("hidden");
-                    }, 1000);
+                        questionElement.classList.remove("hidden");
+                    }, 500);
                 }
             }
         }
 
-        function addAnimatedLine(container, html) {
-            return new Promise(resolve => {
-                const line = document.createElement("div");
-                line.className = "terminal-line";
-                container.appendChild(line);
-
-                const plainText = html.replace(/<[^>]*>/g, '');
-                let i = 0;
-
-                const interval = setInterval(() => {
-                    const currentText = plainText.slice(0, i);
-                    const cursor = (i < plainText.length) ? "_" : "";
-                    line.innerHTML = html.replace(plainText, currentText + cursor);
-                    i++;
-
-                    if (i > plainText.length + 1) {
-                        clearInterval(interval);
-                        line.innerHTML = html;
-                        resolve();
-                    }
-                }, CONFIG.TYPING_SPEED);
-            });
+        function addLine(container, html) {
+            const line = document.createElement("div");
+            line.className = "terminal-line";
+            line.innerHTML = html;
+            container.appendChild(line);
         }
 
         function showSection(sectionId) {
@@ -361,6 +255,8 @@
         }
 
         function answer(recognize) {
+            if (hasAnswered) return;
+
             hasAnswered = true;
 
             // Disable buttons
@@ -387,12 +283,13 @@
 
             setTimeout(async () => {
                 try {
-                    await findUserAndSetup();
+                    await initialize();
                 } catch (error) {
                     btn.disabled = false;
                     btn.textContent = 'Попробовать снова';
+                    showError('Не удалось переподключиться');
                 }
-            }, CONFIG.RECONNECT_DELAY);
+            }, 2000);
         }
 
         function cleanup() {
