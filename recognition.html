@@ -27,7 +27,12 @@
             cursor: pointer;
             font-weight: bold;
             font-family: inherit;
+            transition: all 0.3s ease;
         }
+
+            button:hover:not(:disabled) {
+                background-color: #66ffdd;
+            }
 
             button:disabled {
                 background-color: #333;
@@ -70,6 +75,30 @@
             margin: 20px 0;
             padding: 15px;
             border: 1px solid #00ffcc;
+            background-color: rgba(0, 255, 204, 0.05);
+        }
+
+        .status-indicator {
+            margin: 15px 0;
+            padding: 10px;
+            border-left: 3px solid #00ffcc;
+            background-color: rgba(0, 255, 204, 0.1);
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
     </style>
 </head>
@@ -77,7 +106,7 @@
     <div id="user-list-section" class="section">
         <div id="user-list"></div>
         <div id="question" class="hidden">
-            <div class="question-container">
+            <div class="question-container fade-in">
                 <div class="terminal-line">Ты узнаёшь их?</div>
                 <button onclick="answer(true)" id="yes-btn">Да!</button>
                 <button onclick="answer(false)" id="no-btn">Нет</button>
@@ -86,7 +115,7 @@
     </div>
 
     <div id="post-question" class="section hidden">
-        <div class="terminal-line" id="answer-text"></div>
+        <div class="terminal-line fade-in" id="answer-text"></div>
         <div class="terminal-line">Тем не менее вас всех что-то объединяет...</div>
         <div class="terminal-line">Ух... не пейте кофе... оно не поможет вспомнить...</div>
         <div class="terminal-line">Я пройдусь по каждому из вас...</div>
@@ -118,13 +147,16 @@
         };
 
         const CONFIG = {
-            MIN_PARTICIPANTS: 3
+            MIN_PARTICIPANTS: 3,
+            QUESTION_SHOW_DELAY: 1000
         };
 
         let app, db, nickname, userKey;
         let hasAnswered = false;
         let currentUsers = new Set();
         let listeners = [];
+        let questionTimer = null;
+        let lastUserCount = 0;
 
         async function initialize() {
             try {
@@ -156,29 +188,39 @@
         }
 
         async function findUserKey() {
-            const usersRef = ref(db, 'users');
-            const snapshot = await get(usersRef);
+            try {
+                const usersRef = ref(db, 'users');
+                const snapshot = await get(usersRef);
 
-            if (snapshot.exists()) {
-                const users = snapshot.val();
-                for (const [key, userData] of Object.entries(users)) {
-                    if (userData.nickname === nickname) {
-                        return key;
+                if (snapshot.exists()) {
+                    const users = snapshot.val();
+                    for (const [key, userData] of Object.entries(users)) {
+                        if (userData.nickname === nickname) {
+                            return key;
+                        }
                     }
                 }
+                return null;
+            } catch (error) {
+                console.error('Find user key failed:', error);
+                return null;
             }
-            return null;
         }
 
         async function updateUserStatus() {
-            const userRef = ref(db, 'users/' + userKey);
-            await update(userRef, {
-                lastSeen: Date.now(),
-                inRecognition: true
-            });
+            try {
+                const userRef = ref(db, 'users/' + userKey);
+                await update(userRef, {
+                    lastSeen: Date.now(),
+                    inRecognition: true
+                });
 
-            const disconnectRef = onDisconnect(userRef);
-            await disconnectRef.update({ inRecognition: false });
+                const disconnectRef = onDisconnect(userRef);
+                await disconnectRef.update({ inRecognition: false });
+            } catch (error) {
+                console.error('Update user status failed:', error);
+                throw error;
+            }
         }
 
         function setupListeners() {
@@ -191,30 +233,48 @@
         }
 
         function handleUsersUpdate(snapshot) {
-            if (!snapshot.exists()) return;
+            if (!snapshot.exists()) {
+                displayUsers([], 0);
+                return;
+            }
 
-            const users = snapshot.val();
-            const userList = Object.values(users);
-            const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
-            const others = uniqueNicknames.filter(name => name !== nickname);
+            try {
+                const users = snapshot.val();
+                const userList = Object.values(users).filter(user =>
+                    user && user.nickname && user.inRecognition
+                );
 
-            currentUsers = new Set(uniqueNicknames);
-            displayUsers(others, uniqueNicknames.length);
+                const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
+                const others = uniqueNicknames.filter(name => name !== nickname);
+
+                currentUsers = new Set(uniqueNicknames);
+                const totalCount = uniqueNicknames.length;
+
+                // Only update display if there's a meaningful change
+                if (totalCount !== lastUserCount || others.length > 0) {
+                    displayUsers(others, totalCount);
+                    lastUserCount = totalCount;
+                }
+            } catch (error) {
+                console.error('Handle users update failed:', error);
+                displayUsers([], 0);
+            }
         }
 
         function displayUsers(others, totalPlayers) {
             const userListElement = document.getElementById('user-list');
             userListElement.innerHTML = "";
 
-            // Always hide question if not enough players or already answered
-            const questionElement = document.getElementById('question');
-            if (totalPlayers < CONFIG.MIN_PARTICIPANTS || hasAnswered) {
-                questionElement.classList.add("hidden");
+            // Clear any pending question timer
+            if (questionTimer) {
+                clearTimeout(questionTimer);
+                questionTimer = null;
             }
 
             if (others.length === 0) {
                 addLine(userListElement, `Ты пока здесь один, ${nickname}...`);
                 addLine(userListElement, `Ожидаем других участников<span class="blinking"></span>`);
+                hideQuestion();
             } else {
                 addLine(userListElement, `${nickname}, смотри, кто-то ещё зашёл:`);
 
@@ -226,13 +286,36 @@
                     addLine(listContainer, `→ ${name}`);
                 });
 
-                // Show question only when conditions are met
-                if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasAnswered) {
-                    setTimeout(() => {
-                        questionElement.classList.remove("hidden");
-                    }, 500);
-                }
+                // Add status indicator
+                const statusDiv = document.createElement('div');
+                statusDiv.className = 'status-indicator';
+                statusDiv.innerHTML = `Участников готово: <strong>${totalPlayers}/${CONFIG.MIN_PARTICIPANTS}</strong>`;
+                userListElement.appendChild(statusDiv);
+
+                // Show question with proper conditions and delay
+                scheduleQuestionDisplay(totalPlayers);
             }
+        }
+
+        function scheduleQuestionDisplay(totalPlayers) {
+            const questionElement = document.getElementById('question');
+
+            // Always hide first
+            questionElement.classList.add("hidden");
+
+            // Only show if conditions are met and not already answered
+            if (totalPlayers >= CONFIG.MIN_PARTICIPANTS && !hasAnswered) {
+                questionTimer = setTimeout(() => {
+                    if (!hasAnswered) { // Double check in case state changed
+                        questionElement.classList.remove("hidden");
+                    }
+                }, CONFIG.QUESTION_SHOW_DELAY);
+            }
+        }
+
+        function hideQuestion() {
+            const questionElement = document.getElementById('question');
+            questionElement.classList.add("hidden");
         }
 
         function addLine(container, html) {
@@ -246,7 +329,10 @@
             document.querySelectorAll('.section').forEach(section => {
                 section.classList.add('hidden');
             });
-            document.getElementById(sectionId)?.classList.remove('hidden');
+            const targetSection = document.getElementById(sectionId);
+            if (targetSection) {
+                targetSection.classList.remove('hidden');
+            }
         }
 
         function showError(message) {
@@ -259,9 +345,18 @@
 
             hasAnswered = true;
 
-            // Disable buttons
-            document.getElementById('yes-btn').disabled = true;
-            document.getElementById('no-btn').disabled = true;
+            // Clear any pending timers
+            if (questionTimer) {
+                clearTimeout(questionTimer);
+                questionTimer = null;
+            }
+
+            // Disable buttons with visual feedback
+            const yesBtn = document.getElementById('yes-btn');
+            const noBtn = document.getElementById('no-btn');
+
+            yesBtn.disabled = true;
+            noBtn.disabled = true;
 
             // Show result
             const answerText = recognize
@@ -269,10 +364,18 @@
                 : "Я тоже... нужно больше информации...";
 
             document.getElementById("answer-text").textContent = answerText;
-            showSection('post-question');
+
+            // Add small delay for better UX
+            setTimeout(() => {
+                showSection('post-question');
+            }, 500);
         }
 
         function proceedToStart() {
+            const btn = document.getElementById('proceed-btn');
+            btn.disabled = true;
+            btn.textContent = 'Переход...';
+
             window.location.href = `initialization.html?nickname=${encodeURIComponent(nickname)}`;
         }
 
@@ -280,6 +383,11 @@
             const btn = document.getElementById('reconnect-btn');
             btn.disabled = true;
             btn.textContent = 'Переподключение...';
+
+            // Reset state
+            hasAnswered = false;
+            currentUsers.clear();
+            lastUserCount = 0;
 
             setTimeout(async () => {
                 try {
@@ -293,7 +401,18 @@
         }
 
         function cleanup() {
-            listeners.forEach(unsubscribe => unsubscribe?.());
+            if (questionTimer) {
+                clearTimeout(questionTimer);
+                questionTimer = null;
+            }
+
+            listeners.forEach(unsubscribe => {
+                try {
+                    unsubscribe?.();
+                } catch (error) {
+                    console.error('Cleanup error:', error);
+                }
+            });
             listeners = [];
         }
 
@@ -304,6 +423,7 @@
 
         // Event listeners
         window.addEventListener('beforeunload', cleanup);
+        window.addEventListener('unload', cleanup);
         window.addEventListener('load', initialize);
     </script>
 </body>

@@ -27,7 +27,12 @@
             cursor: pointer;
             font-weight: bold;
             font-family: inherit;
+            transition: all 0.3s ease;
         }
+
+            button:hover:not(:disabled) {
+                background-color: #66ffdd;
+            }
 
             button:disabled {
                 background-color: #333;
@@ -74,6 +79,7 @@
             margin-top: 20px;
             padding: 15px;
             border: 1px solid #00ffcc;
+            background-color: rgba(0, 255, 204, 0.05);
         }
 
         .ready-user {
@@ -81,8 +87,49 @@
             color: #66ff66;
         }
 
+        .not-ready-user {
+            margin: 5px 0;
+            color: #ffaa66;
+        }
+
         .status-line {
             margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #333;
+            border: 1px solid #00ffcc;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: #00ffcc;
+            transition: width 0.5s ease;
+        }
+
+        .user-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 15px 0;
+        }
+
+        .stat-box {
+            padding: 10px;
+            border: 1px solid #666;
+            background-color: rgba(0, 0, 0, 0.3);
+        }
+
+        .countdown {
+            font-size: 1.2em;
+            color: #ffaa00;
+            text-align: center;
+            margin: 15px 0;
         }
     </style>
 </head>
@@ -99,8 +146,31 @@
         <div class="terminal-line">Ожидание синхронизации с другими узлами<span class="blinking"></span></div>
 
         <div id="ready-status">
-            <div class="status-line">Готовы к запуску: <strong><span id="ready-count">0</span>/<span id="total-count">0</span></strong></div>
+            <div class="status-line">
+                Готовы к запуску: <strong><span id="ready-count">0</span>/<span id="total-count">0</span></strong>
+                <span id="ready-percentage"></span>
+            </div>
+
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+
+            <div class="user-stats">
+                <div class="stat-box">
+                    <strong>Активных участников:</strong> <span id="active-count">0</span>
+                </div>
+                <div class="stat-box">
+                    <strong>Минимум для старта:</strong> <span id="min-required">3</span>
+                </div>
+            </div>
+
             <div id="ready-list"></div>
+            <div id="not-ready-list"></div>
+
+            <div id="countdown-section" class="hidden">
+                <div class="countdown">Автозапуск через: <span id="countdown">10</span> сек</div>
+                <button onclick="cancelCountdown()" id="cancel-btn">Отменить автозапуск</button>
+            </div>
         </div>
     </div>
 
@@ -135,13 +205,19 @@
 
         const CONFIG = {
             MIN_PARTICIPANTS: 3,
-            MIN_READY_RATIO: 0.75
+            MIN_READY_RATIO: 0.75,
+            AUTO_START_DELAY: 10000, // 10 seconds
+            HIGH_READY_THRESHOLD: 0.9
         };
 
         let app, db, nickname, userKey;
         let totalUsers = 0;
+        let activeUsers = 0;
         let isMarkedReady = false;
         let listeners = [];
+        let countdownTimer = null;
+        let countdownSeconds = 10;
+        let lastUpdateTime = 0;
 
         async function initialize() {
             try {
@@ -179,29 +255,39 @@
         }
 
         async function findUserKey() {
-            const usersRef = ref(db, 'users');
-            const snapshot = await get(usersRef);
+            try {
+                const usersRef = ref(db, 'users');
+                const snapshot = await get(usersRef);
 
-            if (snapshot.exists()) {
-                const users = snapshot.val();
-                for (const [key, userData] of Object.entries(users)) {
-                    if (userData.nickname === nickname) {
-                        return key;
+                if (snapshot.exists()) {
+                    const users = snapshot.val();
+                    for (const [key, userData] of Object.entries(users)) {
+                        if (userData && userData.nickname === nickname) {
+                            return key;
+                        }
                     }
                 }
+                return null;
+            } catch (error) {
+                console.error('Find user key failed:', error);
+                return null;
             }
-            return null;
         }
 
         async function updateUserStatus() {
-            const userRef = ref(db, 'users/' + userKey);
-            await update(userRef, {
-                lastSeen: Date.now(),
-                inStarting: true
-            });
+            try {
+                const userRef = ref(db, 'users/' + userKey);
+                await update(userRef, {
+                    lastSeen: Date.now(),
+                    inStarting: true
+                });
 
-            const disconnectRef = onDisconnect(userRef);
-            await disconnectRef.update({ inStarting: false });
+                const disconnectRef = onDisconnect(userRef);
+                await disconnectRef.update({ inStarting: false });
+            } catch (error) {
+                console.error('Update user status failed:', error);
+                throw error;
+            }
         }
 
         async function checkIfAlreadyReady() {
@@ -253,59 +339,206 @@
         function setupListeners() {
             // Listen to total user count
             const usersRef = ref(db, 'users');
-            const usersUnsubscribe = onValue(usersRef, (snapshot) => {
-                if (snapshot.exists()) {
-                    const users = snapshot.val();
-                    const userList = Object.values(users);
-                    const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
-                    totalUsers = uniqueNicknames.length;
-                }
+            const usersUnsubscribe = onValue(usersRef, handleUsersUpdate, (error) => {
+                console.error('Users listener error:', error);
+                showError('Потеряно соединение с базой данных пользователей');
             });
 
             // Listen to ready status
             const readyRef = ref(db, 'ready');
-            const readyUnsubscribe = onValue(readyRef, handleReadyUpdate);
+            const readyUnsubscribe = onValue(readyRef, handleReadyUpdate, (error) => {
+                console.error('Ready listener error:', error);
+                showError('Потеряно соединение с сервером готовности');
+            });
 
             listeners.push(usersUnsubscribe, readyUnsubscribe);
         }
 
-        function handleReadyUpdate(snapshot) {
-            const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
-            const readyCount = readyUsers.length;
-            const currentTotal = Math.max(totalUsers, 1);
+        function handleUsersUpdate(snapshot) {
+            try {
+                if (snapshot.exists()) {
+                    const users = snapshot.val();
+                    const userList = Object.values(users).filter(user =>
+                        user && user.nickname && user.inStarting
+                    );
 
-            // Update UI
+                    const uniqueNicknames = [...new Set(userList.map(user => user.nickname))];
+                    totalUsers = uniqueNicknames.length;
+                    activeUsers = userList.length;
+                } else {
+                    totalUsers = 0;
+                    activeUsers = 0;
+                }
+
+                updateDisplay();
+            } catch (error) {
+                console.error('Handle users update failed:', error);
+                totalUsers = 1; // Fallback to at least current user
+                activeUsers = 1;
+                updateDisplay();
+            }
+        }
+
+        function handleReadyUpdate(snapshot) {
+            try {
+                const readyUsers = snapshot.exists() ? Object.values(snapshot.val()) : [];
+                const readyCount = readyUsers.length;
+                const currentTotal = Math.max(totalUsers, 1);
+
+                // Prevent too frequent updates
+                const now = Date.now();
+                if (now - lastUpdateTime < 500) return;
+                lastUpdateTime = now;
+
+                // Update UI elements
+                updateReadyStatus(readyUsers, readyCount, currentTotal);
+
+                // Check conditions for proceeding
+                checkProceedConditions(readyCount, currentTotal);
+
+            } catch (error) {
+                console.error('Handle ready update failed:', error);
+            }
+        }
+
+        function updateReadyStatus(readyUsers, readyCount, currentTotal) {
+            // Update counters
             document.getElementById('ready-count').textContent = readyCount;
             document.getElementById('total-count').textContent = currentTotal;
+            document.getElementById('active-count').textContent = activeUsers;
+            document.getElementById('min-required').textContent = CONFIG.MIN_PARTICIPANTS;
 
-            // Update ready list
+            // Update percentage
+            const percentage = currentTotal > 0 ? Math.round((readyCount / currentTotal) * 100) : 0;
+            document.getElementById('ready-percentage').textContent = `(${percentage}%)`;
+
+            // Update progress bar
+            document.getElementById('progress-fill').style.width = `${percentage}%`;
+
+            // Update user lists
+            updateUserLists(readyUsers, currentTotal);
+        }
+
+        function updateUserLists(readyUsers, currentTotal) {
             const readyListElement = document.getElementById('ready-list');
-            readyListElement.innerHTML = '';
-            readyUsers.forEach(user => {
-                const userDiv = document.createElement('div');
-                userDiv.className = 'ready-user';
-                userDiv.textContent = `✓ ${user.nickname}`;
-                readyListElement.appendChild(userDiv);
-            });
+            const notReadyListElement = document.getElementById('not-ready-list');
 
-            // Check if ready to proceed
+            readyListElement.innerHTML = '';
+            notReadyListElement.innerHTML = '';
+
+            // Ready users
+            if (readyUsers.length > 0) {
+                const readyTitle = document.createElement('div');
+                readyTitle.innerHTML = '<strong>Готовы:</strong>';
+                readyTitle.style.color = '#66ff66';
+                readyTitle.style.marginTop = '15px';
+                readyListElement.appendChild(readyTitle);
+
+                readyUsers.forEach(user => {
+                    const userDiv = document.createElement('div');
+                    userDiv.className = 'ready-user';
+                    userDiv.textContent = `✓ ${user.nickname}`;
+                    readyListElement.appendChild(userDiv);
+                });
+            }
+
+            // Show not ready users if we have the information
+            const readyNicknames = readyUsers.map(user => user.nickname);
+            if (currentTotal > readyUsers.length) {
+                const notReadyTitle = document.createElement('div');
+                notReadyTitle.innerHTML = '<strong>Ожидаем:</strong>';
+                notReadyTitle.style.color = '#ffaa66';
+                notReadyTitle.style.marginTop = '15px';
+                notReadyListElement.appendChild(notReadyTitle);
+
+                const waitingCount = currentTotal - readyUsers.length;
+                const waitingDiv = document.createElement('div');
+                waitingDiv.className = 'not-ready-user';
+                waitingDiv.textContent = `⏳ ${waitingCount} участников`;
+                notReadyListElement.appendChild(waitingDiv);
+            }
+        }
+
+        function checkProceedConditions(readyCount, currentTotal) {
             const minReady = Math.max(CONFIG.MIN_PARTICIPANTS, Math.ceil(currentTotal * CONFIG.MIN_READY_RATIO));
             const canProceed = currentTotal >= CONFIG.MIN_PARTICIPANTS && readyCount >= minReady;
+            const highReadyRatio = readyCount / currentTotal >= CONFIG.HIGH_READY_THRESHOLD;
+
+            // Cancel any existing countdown
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+                document.getElementById('countdown-section').classList.add('hidden');
+            }
 
             if (canProceed) {
-                showSection('success-section');
-                setTimeout(() => {
-                    // Navigate to next stage
-                    window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
-                }, 2500);
+                if (readyCount === currentTotal) {
+                    // Everyone is ready - proceed immediately
+                    proceedToNextStage();
+                } else if (highReadyRatio && readyCount >= CONFIG.MIN_PARTICIPANTS) {
+                    // High percentage ready - start countdown
+                    startCountdown();
+                }
             }
+        }
+
+        function startCountdown() {
+            document.getElementById('countdown-section').classList.remove('hidden');
+            countdownSeconds = 10;
+            updateCountdownDisplay();
+
+            countdownTimer = setInterval(() => {
+                countdownSeconds--;
+                updateCountdownDisplay();
+
+                if (countdownSeconds <= 0) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    proceedToNextStage();
+                }
+            }, 1000);
+        }
+
+        function updateCountdownDisplay() {
+            document.getElementById('countdown').textContent = countdownSeconds;
+        }
+
+        function cancelCountdown() {
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+                document.getElementById('countdown-section').classList.add('hidden');
+            }
+        }
+
+        function proceedToNextStage() {
+            showSection('success-section');
+            setTimeout(() => {
+                window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
+            }, 2500);
+        }
+
+        function updateDisplay() {
+            // This function can be called to refresh display without ready update
+            const readyCount = parseInt(document.getElementById('ready-count').textContent) || 0;
+            const currentTotal = Math.max(totalUsers, 1);
+
+            document.getElementById('total-count').textContent = currentTotal;
+            document.getElementById('active-count').textContent = activeUsers;
+
+            const percentage = currentTotal > 0 ? Math.round((readyCount / currentTotal) * 100) : 0;
+            document.getElementById('ready-percentage').textContent = `(${percentage}%)`;
+            document.getElementById('progress-fill').style.width = `${percentage}%`;
         }
 
         function showSection(sectionId) {
             document.querySelectorAll('.section').forEach(section => {
                 section.classList.add('hidden');
             });
-            document.getElementById(sectionId)?.classList.remove('hidden');
+            const targetSection = document.getElementById(sectionId);
+            if (targetSection) {
+                targetSection.classList.remove('hidden');
+            }
         }
 
         function showError(message) {
@@ -317,6 +550,18 @@
             const btn = document.getElementById('reconnect-btn');
             btn.disabled = true;
             btn.textContent = 'Переподключение...';
+
+            // Reset state
+            isMarkedReady = false;
+            totalUsers = 0;
+            activeUsers = 0;
+            lastUpdateTime = 0;
+
+            // Cancel any timers
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+            }
 
             setTimeout(async () => {
                 try {
@@ -330,16 +575,31 @@
         }
 
         function cleanup() {
-            listeners.forEach(unsubscribe => unsubscribe?.());
+            // Clear timers
+            if (countdownTimer) {
+                clearInterval(countdownTimer);
+                countdownTimer = null;
+            }
+
+            // Clear listeners
+            listeners.forEach(unsubscribe => {
+                try {
+                    unsubscribe?.();
+                } catch (error) {
+                    console.error('Cleanup error:', error);
+                }
+            });
             listeners = [];
         }
 
         // Global functions
         window.markReady = markReady;
         window.reconnect = reconnect;
+        window.cancelCountdown = cancelCountdown;
 
         // Event listeners
         window.addEventListener('beforeunload', cleanup);
+        window.addEventListener('unload', cleanup);
         window.addEventListener('load', initialize);
     </script>
 </body>
