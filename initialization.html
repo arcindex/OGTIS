@@ -168,7 +168,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, remove, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -184,9 +184,8 @@
         const AUTO_START_THRESHOLD = 0.8; // 80% ready
 
         let app, db, nickname;
-        let isMarkedReady = false;
-        let unsubscribeUsers = null;
-        let unsubscribeReady = null;
+        let isReady = false;
+        let unsubscribe = null;
         let countdownTimer = null;
         let countdownSeconds = 10;
 
@@ -205,11 +204,12 @@
 
                 await updateUserStage();
 
-                // Check if already ready
+                // Check if already marked ready
                 const readyRef = ref(db, `session/ready/${nickname}`);
                 const readySnapshot = await get(readyRef);
 
                 if (readySnapshot.exists()) {
+                    isReady = true;
                     showWaitingScreen();
                 } else {
                     showSection('intro-section');
@@ -234,13 +234,12 @@
         }
 
         function showWaitingScreen() {
-            isMarkedReady = true;
             showSection('waiting');
-            setupListeners();
+            setupListener();
         }
 
         async function markReady() {
-            if (isMarkedReady) return;
+            if (isReady) return;
 
             const readyBtn = document.getElementById('ready-btn');
             readyBtn.disabled = true;
@@ -256,6 +255,7 @@
                 const disconnectRef = onDisconnect(readyRef);
                 await disconnectRef.remove();
 
+                isReady = true;
                 showWaitingScreen();
 
             } catch (error) {
@@ -266,44 +266,30 @@
             }
         }
 
-        function setupListeners() {
-            // Listen to users
-            const usersRef = ref(db, 'session/users');
-            unsubscribeUsers = onValue(usersRef, handleUsersUpdate, (error) => {
-                console.error('Users listener error:', error);
-                showError('Потеряно соединение с сервером');
-            });
+        function setupListener() {
+            const sessionRef = ref(db, 'session');
+            unsubscribe = onValue(sessionRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const data = snapshot.val();
+                    const users = data.users || {};
+                    const ready = data.ready || {};
 
-            // Listen to ready status
-            const readyRef = ref(db, 'session/ready');
-            unsubscribeReady = onValue(readyRef, handleReadyUpdate, (error) => {
-                console.error('Ready listener error:', error);
+                    // Get users in initialization stage
+                    const initUsers = Object.values(users).filter(user => user.stage === 'initialization');
+                    const readyUsers = Object.keys(ready);
+
+                    updateDisplay(readyUsers, initUsers.length);
+                    checkProceedConditions(readyUsers.length, initUsers.length);
+                }
+            }, (error) => {
+                console.error('Database error:', error);
                 showError('Потеряно соединение с сервером');
             });
         }
 
-        function handleUsersUpdate(snapshot) {
-            // This just updates the user count context
-            updateDisplay();
-        }
-
-        function handleReadyUpdate(snapshot) {
-            const readyUsers = snapshot.exists() ? Object.keys(snapshot.val()) : [];
+        function updateDisplay(readyUsers, totalUsers) {
             const readyCount = readyUsers.length;
 
-            // Get total users in initialization stage
-            const usersRef = ref(db, 'session/users');
-            get(usersRef).then(usersSnapshot => {
-                const totalUsers = usersSnapshot.exists()
-                    ? Object.values(usersSnapshot.val()).filter(user => user.stage === 'initialization').length
-                    : 0;
-
-                updateReadyStatus(readyUsers, readyCount, totalUsers);
-                checkProceedConditions(readyCount, totalUsers);
-            });
-        }
-
-        function updateReadyStatus(readyUsers, readyCount, totalUsers) {
             document.getElementById('ready-count').textContent = readyCount;
             document.getElementById('total-count').textContent = totalUsers;
 
@@ -396,18 +382,6 @@
             }, 2500);
         }
 
-        function updateDisplay() {
-            // Refresh current display
-            const readyCount = parseInt(document.getElementById('ready-count').textContent) || 0;
-            const totalCount = parseInt(document.getElementById('total-count').textContent) || 0;
-
-            if (totalCount > 0) {
-                const percentage = Math.round((readyCount / totalCount) * 100);
-                document.getElementById('ready-percentage').textContent = `(${percentage}%)`;
-                document.getElementById('progress-fill').style.width = `${percentage}%`;
-            }
-        }
-
         function showSection(sectionId) {
             document.querySelectorAll('.section').forEach(section => {
                 section.classList.add('hidden');
@@ -426,7 +400,7 @@
             btn.textContent = 'Переподключение...';
 
             // Reset state
-            isMarkedReady = false;
+            isReady = false;
             if (countdownTimer) {
                 clearInterval(countdownTimer);
                 countdownTimer = null;
@@ -449,14 +423,9 @@
                 countdownTimer = null;
             }
 
-            if (unsubscribeUsers) {
-                unsubscribeUsers();
-                unsubscribeUsers = null;
-            }
-
-            if (unsubscribeReady) {
-                unsubscribeReady();
-                unsubscribeReady = null;
+            if (unsubscribe) {
+                unsubscribe();
+                unsubscribe = null;
             }
         }
 

@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -196,7 +195,9 @@
             unsubscribe = onValue(usersRef, (snapshot) => {
                 if (snapshot.exists()) {
                     const users = snapshot.val();
-                    const otherUsers = Object.keys(users).filter(name => name !== nickname);
+                    // Only count users in recognition stage
+                    const recognitionUsers = Object.values(users).filter(user => user.stage === 'recognition');
+                    const otherUsers = recognitionUsers.filter(user => user.nickname !== nickname).map(user => user.nickname);
                     updateDisplay(otherUsers);
                 } else {
                     updateDisplay([]);
