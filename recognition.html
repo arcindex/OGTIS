@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -78,13 +79,6 @@
             background-color: rgba(0, 255, 204, 0.05);
         }
 
-        .status-indicator {
-            margin: 15px 0;
-            padding: 10px;
-            border-left: 3px solid #00ffcc;
-            background-color: rgba(0, 255, 204, 0.1);
-        }
-
         .fade-in {
             animation: fadeIn 0.5s ease-in;
         }
@@ -103,9 +97,15 @@
     </style>
 </head>
 <body>
-    <div id="user-list-section" class="section">
-        <div id="user-list"></div>
-        <div id="question" class="hidden">
+    <div id="waiting-section" class="section">
+        <div class="terminal-line">Ты пока здесь один, <span id="waiting-nickname"></span>...</div>
+        <div class="terminal-line">Ожидаем других участников<span class="blinking"></span></div>
+    </div>
+
+    <div id="recognition-section" class="section hidden">
+        <div class="terminal-line"><span id="recognition-nickname"></span>, смотри, кто-то ещё зашёл:</div>
+        <div id="user-list" class="user-list"></div>
+        <div id="question">
             <div class="question-container fade-in">
                 <div class="terminal-line">Ты узнаёшь их?</div>
                 <button onclick="answer(true)" id="yes-btn">Да!</button>
@@ -134,7 +134,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -151,7 +151,6 @@
         let app, db, nickname;
         let hasAnswered = false;
         let unsubscribe = null;
-        let questionTimeout = null; // Track the timeout
 
         async function initialize() {
             try {
@@ -166,9 +165,12 @@
                     return;
                 }
 
+                // Set nicknames in UI
+                document.getElementById('waiting-nickname').textContent = nickname;
+                document.getElementById('recognition-nickname').textContent = nickname;
+
                 await joinSession();
                 setupListener();
-                showSection('user-list-section');
 
             } catch (error) {
                 console.error('Initialization failed:', error);
@@ -194,10 +196,10 @@
             unsubscribe = onValue(usersRef, (snapshot) => {
                 if (snapshot.exists()) {
                     const users = snapshot.val();
-                    const userList = Object.keys(users).filter(name => name !== nickname);
-                    displayUsers(userList);
+                    const otherUsers = Object.keys(users).filter(name => name !== nickname);
+                    updateDisplay(otherUsers);
                 } else {
-                    displayUsers([]);
+                    updateDisplay([]);
                 }
             }, (error) => {
                 console.error('Database error:', error);
@@ -205,72 +207,27 @@
             });
         }
 
-        function displayUsers(others) {
+        function updateDisplay(otherUsers) {
+            const totalCount = otherUsers.length + 1;
+
+            if (totalCount < MIN_PARTICIPANTS) {
+                showSection('waiting-section');
+            } else if (!hasAnswered) {
+                showUserList(otherUsers);
+                showSection('recognition-section');
+            }
+        }
+
+        function showUserList(otherUsers) {
             const userListElement = document.getElementById('user-list');
-            userListElement.innerHTML = "";
+            userListElement.innerHTML = '';
 
-            const totalCount = others.length + 1; // +1 for current user
-
-            // Clear any existing timeout
-            if (questionTimeout) {
-                clearTimeout(questionTimeout);
-                questionTimeout = null;
-            }
-
-            if (others.length === 0) {
-                addLine(userListElement, `Ты пока здесь один, ${nickname}...`);
-                addLine(userListElement, `Ожидаем других участников<span class="blinking"></span>`);
-                hideQuestion();
-            } else {
-                addLine(userListElement, `${nickname}, смотри, кто-то ещё зашёл:`);
-
-                const listContainer = document.createElement('div');
-                listContainer.className = 'user-list';
-                userListElement.appendChild(listContainer);
-
-                others.forEach(name => {
-                    addLine(listContainer, `→ ${name}`);
-                });
-
-                // Status indicator
-                const statusDiv = document.createElement('div');
-                statusDiv.className = 'status-indicator';
-                statusDiv.innerHTML = `Участников готово: <strong>${totalCount}/${MIN_PARTICIPANTS}</strong>`;
-                userListElement.appendChild(statusDiv);
-
-                // Show question only if enough participants and not answered
-                if (totalCount >= MIN_PARTICIPANTS && !hasAnswered) {
-                    questionTimeout = setTimeout(() => {
-                        // Double-check conditions haven't changed
-                        if (!hasAnswered && totalCount >= MIN_PARTICIPANTS) {
-                            showQuestion();
-                        }
-                    }, 1000);
-                } else {
-                    hideQuestion();
-                }
-            }
-        }
-
-        function showQuestion() {
-            const questionElement = document.getElementById('question');
-            if (questionElement) {
-                questionElement.classList.remove("hidden");
-            }
-        }
-
-        function hideQuestion() {
-            const questionElement = document.getElementById('question');
-            if (questionElement) {
-                questionElement.classList.add("hidden");
-            }
-        }
-
-        function addLine(container, html) {
-            const line = document.createElement("div");
-            line.className = "terminal-line";
-            line.innerHTML = html;
-            container.appendChild(line);
+            otherUsers.forEach(name => {
+                const line = document.createElement('div');
+                line.className = 'terminal-line';
+                line.textContent = `→ ${name}`;
+                userListElement.appendChild(line);
+            });
         }
 
         function showSection(sectionId) {
@@ -288,12 +245,6 @@
         function answer(recognize) {
             if (hasAnswered) return;
             hasAnswered = true;
-
-            // Clear any pending question timeout
-            if (questionTimeout) {
-                clearTimeout(questionTimeout);
-                questionTimeout = null;
-            }
 
             // Disable buttons
             document.getElementById('yes-btn').disabled = true;
@@ -324,12 +275,6 @@
 
             hasAnswered = false;
 
-            // Clear any existing timeout
-            if (questionTimeout) {
-                clearTimeout(questionTimeout);
-                questionTimeout = null;
-            }
-
             setTimeout(async () => {
                 try {
                     await initialize();
@@ -345,10 +290,6 @@
             if (unsubscribe) {
                 unsubscribe();
                 unsubscribe = null;
-            }
-            if (questionTimeout) {
-                clearTimeout(questionTimeout);
-                questionTimeout = null;
             }
         }
 
