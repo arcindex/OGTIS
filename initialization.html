@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -92,31 +93,20 @@
             color: #ffaa66;
         }
 
-        .status-line {
-            margin-bottom: 10px;
-            font-size: 1.1em;
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
         }
 
-        .progress-bar {
-            width: 100%;
-            height: 20px;
-            background-color: #333;
-            border: 1px solid #00ffcc;
-            margin: 10px 0;
-            overflow: hidden;
-        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
 
-        .progress-fill {
-            height: 100%;
-            background-color: #00ffcc;
-            transition: width 0.5s ease;
-        }
-
-        .countdown {
-            font-size: 1.2em;
-            color: #ffaa00;
-            text-align: center;
-            margin: 15px 0;
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
     </style>
 </head>
@@ -133,20 +123,12 @@
         <div class="terminal-line">Ожидание синхронизации с другими узлами<span class="blinking"></span></div>
 
         <div id="ready-status">
-            <div class="status-line">
-                Готовы к запуску: <strong><span id="ready-count">0</span>/<span id="total-count">0</span></strong>
-                <span id="ready-percentage"></span>
-            </div>
-
-            <div class="progress-bar">
-                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
-            </div>
-
+            <div class="terminal-line">Готовы к запуску: <strong><span id="ready-count">0</span>/<span id="total-count">0</span></strong></div>
             <div id="user-lists"></div>
 
-            <div id="countdown-section" class="hidden">
-                <div class="countdown">Автозапуск через: <span id="countdown">10</span> сек</div>
-                <button onclick="cancelCountdown()" id="cancel-btn">Отменить автозапуск</button>
+            <div id="all-ready-message" class="hidden">
+                <div class="terminal-line" style="color: #66ff66; margin-top: 15px;">Все участники готовы!</div>
+                <button onclick="proceedToNextStage()" id="proceed-btn">Начать процесс</button>
             </div>
         </div>
     </div>
@@ -161,7 +143,6 @@
 
     <div id="success-section" class="section hidden">
         <div class="success-message">
-            <div class="terminal-line">Все участники готовы!</div>
             <div class="terminal-line">Переход к следующему этапу<span class="blinking"></span></div>
         </div>
     </div>
@@ -180,14 +161,9 @@
             databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
         };
 
-        const MIN_PARTICIPANTS = 3;
-        const AUTO_START_THRESHOLD = 0.8; // 80% ready
-
         let app, db, nickname;
-        let isReady = false;
+        let isMarkedReady = false;
         let unsubscribe = null;
-        let countdownTimer = null;
-        let countdownSeconds = 10;
 
         async function initialize() {
             try {
@@ -204,12 +180,11 @@
 
                 await updateUserStage();
 
-                // Check if already marked ready
+                // Check if already ready
                 const readyRef = ref(db, `session/ready/${nickname}`);
                 const readySnapshot = await get(readyRef);
 
                 if (readySnapshot.exists()) {
-                    isReady = true;
                     showWaitingScreen();
                 } else {
                     showSection('intro-section');
@@ -234,12 +209,13 @@
         }
 
         function showWaitingScreen() {
+            isMarkedReady = true;
             showSection('waiting');
             setupListener();
         }
 
         async function markReady() {
-            if (isReady) return;
+            if (isMarkedReady) return;
 
             const readyBtn = document.getElementById('ready-btn');
             readyBtn.disabled = true;
@@ -255,7 +231,6 @@
                 const disconnectRef = onDisconnect(readyRef);
                 await disconnectRef.remove();
 
-                isReady = true;
                 showWaitingScreen();
 
             } catch (error) {
@@ -267,119 +242,82 @@
         }
 
         function setupListener() {
+            // Listen to all session data
             const sessionRef = ref(db, 'session');
             unsubscribe = onValue(sessionRef, (snapshot) => {
                 if (snapshot.exists()) {
-                    const data = snapshot.val();
-                    const users = data.users || {};
-                    const ready = data.ready || {};
+                    const sessionData = snapshot.val();
+                    const users = sessionData.users || {};
+                    const ready = sessionData.ready || {};
 
-                    // Get users in initialization stage
-                    const initUsers = Object.values(users).filter(user => user.stage === 'initialization');
-                    const readyUsers = Object.keys(ready);
-
-                    updateDisplay(readyUsers, initUsers.length);
-                    checkProceedConditions(readyUsers.length, initUsers.length);
+                    updateDisplay(users, ready);
+                } else {
+                    updateDisplay({}, {});
                 }
             }, (error) => {
-                console.error('Database error:', error);
+                console.error('Session listener error:', error);
                 showError('Потеряно соединение с сервером');
             });
         }
 
-        function updateDisplay(readyUsers, totalUsers) {
-            const readyCount = readyUsers.length;
+        function updateDisplay(allUsers, readyUsers) {
+            // Filter users in initialization stage
+            const initUsers = Object.values(allUsers).filter(user => user.stage === 'initialization');
+            const totalCount = initUsers.length;
+            const readyCount = Object.keys(readyUsers).length;
 
             document.getElementById('ready-count').textContent = readyCount;
-            document.getElementById('total-count').textContent = totalUsers;
-
-            const percentage = totalUsers > 0 ? Math.round((readyCount / totalUsers) * 100) : 0;
-            document.getElementById('ready-percentage').textContent = `(${percentage}%)`;
-            document.getElementById('progress-fill').style.width = `${percentage}%`;
+            document.getElementById('total-count').textContent = totalCount;
 
             // Update user lists
             const userListsElement = document.getElementById('user-lists');
             userListsElement.innerHTML = '';
 
-            if (readyUsers.length > 0) {
+            if (readyCount > 0) {
                 const readyDiv = document.createElement('div');
-                readyDiv.innerHTML = '<strong style="color: #66ff66;">Готовы:</strong>';
+                readyDiv.innerHTML = '<div class="terminal-line" style="color: #66ff66; margin-top: 15px;"><strong>Готовы:</strong></div>';
                 userListsElement.appendChild(readyDiv);
 
-                readyUsers.forEach(name => {
+                Object.keys(readyUsers).forEach(name => {
                     const userDiv = document.createElement('div');
                     userDiv.className = 'ready-user';
-                    userDiv.textContent = `✓ ${name}`;
+                    userDiv.textContent = `→ ${name}`;
                     userListsElement.appendChild(userDiv);
                 });
             }
 
-            const waitingCount = totalUsers - readyCount;
-            if (waitingCount > 0) {
+            const waitingUsers = initUsers.filter(user => !readyUsers[user.nickname]);
+            if (waitingUsers.length > 0) {
                 const waitingDiv = document.createElement('div');
-                waitingDiv.innerHTML = '<strong style="color: #ffaa66; margin-top: 15px; display: block;">Ожидаем:</strong>';
+                waitingDiv.innerHTML = '<div class="terminal-line" style="color: #ffaa66; margin-top: 15px;"><strong>Ожидаем:</strong></div>';
                 userListsElement.appendChild(waitingDiv);
 
-                const countDiv = document.createElement('div');
-                countDiv.className = 'waiting-user';
-                countDiv.textContent = `⏳ ${waitingCount} участников`;
-                userListsElement.appendChild(countDiv);
-            }
-        }
-
-        function checkProceedConditions(readyCount, totalUsers) {
-            // Cancel existing countdown
-            if (countdownTimer) {
-                clearInterval(countdownTimer);
-                countdownTimer = null;
-                document.getElementById('countdown-section').classList.add('hidden');
+                waitingUsers.forEach(user => {
+                    const userDiv = document.createElement('div');
+                    userDiv.className = 'waiting-user';
+                    userDiv.textContent = `→ ${user.nickname}`;
+                    userListsElement.appendChild(userDiv);
+                });
             }
 
-            const readyRatio = totalUsers > 0 ? readyCount / totalUsers : 0;
-
-            if (readyCount === totalUsers && totalUsers >= MIN_PARTICIPANTS) {
-                // Everyone ready - proceed immediately
-                proceedToNextStage();
-            } else if (readyCount >= MIN_PARTICIPANTS && readyRatio >= AUTO_START_THRESHOLD) {
-                // Enough ready - start countdown
-                startCountdown();
-            }
-        }
-
-        function startCountdown() {
-            document.getElementById('countdown-section').classList.remove('hidden');
-            countdownSeconds = 10;
-            updateCountdownDisplay();
-
-            countdownTimer = setInterval(() => {
-                countdownSeconds--;
-                updateCountdownDisplay();
-
-                if (countdownSeconds <= 0) {
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                    proceedToNextStage();
-                }
-            }, 1000);
-        }
-
-        function updateCountdownDisplay() {
-            document.getElementById('countdown').textContent = countdownSeconds;
-        }
-
-        function cancelCountdown() {
-            if (countdownTimer) {
-                clearInterval(countdownTimer);
-                countdownTimer = null;
-                document.getElementById('countdown-section').classList.add('hidden');
+            // Show proceed button if everyone is ready
+            const allReadyMessage = document.getElementById('all-ready-message');
+            if (totalCount > 0 && readyCount === totalCount) {
+                allReadyMessage.classList.remove('hidden');
+            } else {
+                allReadyMessage.classList.add('hidden');
             }
         }
 
         function proceedToNextStage() {
+            const btn = document.getElementById('proceed-btn');
+            btn.disabled = true;
+            btn.textContent = 'Переход...';
+
             showSection('success-section');
             setTimeout(() => {
                 window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
-            }, 2500);
+            }, 2000);
         }
 
         function showSection(sectionId) {
@@ -400,11 +338,7 @@
             btn.textContent = 'Переподключение...';
 
             // Reset state
-            isReady = false;
-            if (countdownTimer) {
-                clearInterval(countdownTimer);
-                countdownTimer = null;
-            }
+            isMarkedReady = false;
 
             setTimeout(async () => {
                 try {
@@ -418,11 +352,6 @@
         }
 
         function cleanup() {
-            if (countdownTimer) {
-                clearInterval(countdownTimer);
-                countdownTimer = null;
-            }
-
             if (unsubscribe) {
                 unsubscribe();
                 unsubscribe = null;
@@ -432,7 +361,7 @@
         // Global functions
         window.markReady = markReady;
         window.reconnect = reconnect;
-        window.cancelCountdown = cancelCountdown;
+        window.proceedToNextStage = proceedToNextStage;
 
         // Event listeners
         window.addEventListener('beforeunload', cleanup);

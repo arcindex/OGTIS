@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -107,7 +108,7 @@
         <div id="question">
             <div class="question-container fade-in">
                 <div class="terminal-line">Ты узнаёшь их?</div>
-                <button onclick="answer(true)" id="yes-btn">Да!</button>
+                <button onclick="answer(true)" id="yes-btn">Да</button>
                 <button onclick="answer(false)" id="no-btn">Нет</button>
             </div>
         </div>
@@ -195,9 +196,7 @@
             unsubscribe = onValue(usersRef, (snapshot) => {
                 if (snapshot.exists()) {
                     const users = snapshot.val();
-                    // Only count users in recognition stage
-                    const recognitionUsers = Object.values(users).filter(user => user.stage === 'recognition');
-                    const otherUsers = recognitionUsers.filter(user => user.nickname !== nickname).map(user => user.nickname);
+                    const otherUsers = Object.keys(users).filter(name => name !== nickname);
                     updateDisplay(otherUsers);
                 } else {
                     updateDisplay([]);
