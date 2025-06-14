@@ -151,6 +151,7 @@
         let app, db, nickname;
         let hasAnswered = false;
         let unsubscribe = null;
+        let questionTimeout = null; // Track the timeout
 
         async function initialize() {
             try {
@@ -210,6 +211,12 @@
 
             const totalCount = others.length + 1; // +1 for current user
 
+            // Clear any existing timeout
+            if (questionTimeout) {
+                clearTimeout(questionTimeout);
+                questionTimeout = null;
+            }
+
             if (others.length === 0) {
                 addLine(userListElement, `Ты пока здесь один, ${nickname}...`);
                 addLine(userListElement, `Ожидаем других участников<span class="blinking"></span>`);
@@ -231,11 +238,12 @@
                 statusDiv.innerHTML = `Участников готово: <strong>${totalCount}/${MIN_PARTICIPANTS}</strong>`;
                 userListElement.appendChild(statusDiv);
 
-                // Show question if enough participants and not answered
+                // Show question only if enough participants and not answered
                 if (totalCount >= MIN_PARTICIPANTS && !hasAnswered) {
-                    setTimeout(() => {
-                        if (!hasAnswered) {
-                            document.getElementById('question').classList.remove("hidden");
+                    questionTimeout = setTimeout(() => {
+                        // Double-check conditions haven't changed
+                        if (!hasAnswered && totalCount >= MIN_PARTICIPANTS) {
+                            showQuestion();
                         }
                     }, 1000);
                 } else {
@@ -244,8 +252,18 @@
             }
         }
 
+        function showQuestion() {
+            const questionElement = document.getElementById('question');
+            if (questionElement) {
+                questionElement.classList.remove("hidden");
+            }
+        }
+
         function hideQuestion() {
-            document.getElementById('question').classList.add("hidden");
+            const questionElement = document.getElementById('question');
+            if (questionElement) {
+                questionElement.classList.add("hidden");
+            }
         }
 
         function addLine(container, html) {
@@ -270,6 +288,12 @@
         function answer(recognize) {
             if (hasAnswered) return;
             hasAnswered = true;
+
+            // Clear any pending question timeout
+            if (questionTimeout) {
+                clearTimeout(questionTimeout);
+                questionTimeout = null;
+            }
 
             // Disable buttons
             document.getElementById('yes-btn').disabled = true;
@@ -300,6 +324,12 @@
 
             hasAnswered = false;
 
+            // Clear any existing timeout
+            if (questionTimeout) {
+                clearTimeout(questionTimeout);
+                questionTimeout = null;
+            }
+
             setTimeout(async () => {
                 try {
                     await initialize();
@@ -315,6 +345,10 @@
             if (unsubscribe) {
                 unsubscribe();
                 unsubscribe = null;
+            }
+            if (questionTimeout) {
+                clearTimeout(questionTimeout);
+                questionTimeout = null;
             }
         }
 
