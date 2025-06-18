@@ -110,9 +110,15 @@
     </style>
 </head>
 <body>
-    <div id="intro-section" class="section">
+    <div id="loading-section" class="section">
+        <div class="terminal-line">Подключение к системе<span class="blinking"></span></div>
+        <div class="terminal-line">Проверка участников сессии...</div>
+    </div>
+
+    <div id="intro-section" class="section hidden">
         <div class="terminal-line">Выявим вместе... кто вы...</div>
         <div class="terminal-line">Система восстановления памяти готова к инициализации.</div>
+        <div class="terminal-line">Участников в сессии: <strong><span id="session-count">0</span></strong></div>
         <div class="terminal-line">Нажмите готов, когда будете готовы начать процесс.</div>
         <button onclick="markReady()" id="ready-btn">Готов начать</button>
     </div>
@@ -122,6 +128,7 @@
         <div class="terminal-line">Ожидание синхронизации с другими узлами<span class="blinking"></span></div>
 
         <div id="ready-status">
+            <div class="terminal-line">Участников в сессии: <strong><span id="total-session-count">0</span></strong></div>
             <div class="terminal-line">Готовы к запуску: <strong><span id="ready-count">0</span>/<span id="total-count">0</span></strong></div>
             <div id="user-lists"></div>
 
@@ -181,27 +188,20 @@
                     return;
                 }
 
-                // Get the list of participants from recognition stage
-                await getSessionParticipants();
-
-                await updateUserStage();
-                await initializeStageTracking();
-
-                // Check current state
-                const initStateRef = ref(db, `session/stages/initialization`);
-                const stateSnapshot = await get(initStateRef);
-                const currentState = stateSnapshot.val() || {};
-
-                if (currentState.ready && currentState.ready[nickname]) {
-                    isMarkedReady = true;
-                    if (currentState.confirmed && currentState.confirmed[nickname]) {
-                        hasConfirmedProceed = true;
-                    }
-                    showWaitingScreen();
-                } else {
-                    showSection('intro-section');
+                // Verify user was part of the session
+                const isValidParticipant = await verifySessionParticipant();
+                if (!isValidParticipant) {
+                    showError('Вы не являетесь участником текущей сессии.');
+                    return;
                 }
 
+                // Update user stage but keep them in session tracking
+                await updateUserStage();
+
+                // Check current ready/confirm state
+                await checkCurrentState();
+
+                // Start listening for updates
                 setupListener();
 
             } catch (error) {
@@ -210,84 +210,78 @@
             }
         }
 
-        async function getSessionParticipants() {
+        async function verifySessionParticipant() {
             try {
-                // Get participants who were in recognition stage
-                const participantsRef = ref(db, 'session/participants');
-                const snapshot = await get(participantsRef);
+                // Check if there's an active session from recognition stage
+                const sessionRef = ref(db, 'session/quest_participants');
+                const snapshot = await get(sessionRef);
 
                 if (snapshot.exists()) {
-                    sessionParticipants = Object.keys(snapshot.val());
-                } else {
-                    // Fallback: check current users if participants list doesn't exist
-                    const usersRef = ref(db, 'session/users');
-                    const usersSnapshot = await get(usersRef);
-                    if (usersSnapshot.exists()) {
-                        sessionParticipants = Object.keys(usersSnapshot.val());
+                    const questParticipants = snapshot.val();
+                    sessionParticipants = Object.keys(questParticipants);
+
+                    if (!sessionParticipants.includes(nickname)) {
+                        return false;
                     }
+
+                    console.log('Session participants:', sessionParticipants);
+                    return true;
+                } else {
+                    // No session found - redirect back to start
+                    return false;
                 }
-
-                // Ensure current user is in the list
-                if (!sessionParticipants.includes(nickname)) {
-                    sessionParticipants.push(nickname);
-                }
-
-                // Update the participants list to include current stage
-                const participantsRef = ref(db, 'session/participants');
-                const participantsData = {};
-                sessionParticipants.forEach(name => {
-                    participantsData[name] = {
-                        nickname: name,
-                        joinedAt: serverTimestamp()
-                    };
-                });
-                await set(participantsRef, participantsData);
-
             } catch (error) {
-                console.error('Failed to get session participants:', error);
-                sessionParticipants = [nickname]; // Fallback to just current user
-            }
-        }
-
-        async function initializeStageTracking() {
-            const stageRef = ref(db, `session/stages/initialization`);
-            const snapshot = await get(stageRef);
-
-            if (!snapshot.exists()) {
-                await set(stageRef, {
-                    ready: {},
-                    confirmed: {},
-                    totalParticipants: sessionParticipants.length,
-                    participantsList: sessionParticipants,
-                    createdAt: serverTimestamp()
-                });
-            } else {
-                // Update participant count if it's different
-                const currentData = snapshot.val();
-                if (currentData.totalParticipants !== sessionParticipants.length) {
-                    await update(stageRef, {
-                        totalParticipants: sessionParticipants.length,
-                        participantsList: sessionParticipants
-                    });
-                }
+                console.error('Failed to verify session participant:', error);
+                return false;
             }
         }
 
         async function updateUserStage() {
-            const userRef = ref(db, `session/users/${nickname}`);
-            await set(userRef, {
-                nickname: nickname,
+            // Update user's current stage while keeping them in the main session
+            const userRef = ref(db, `session/quest_participants/${nickname}`);
+            await update(userRef, {
                 stage: 'initialization',
                 lastSeen: serverTimestamp()
             });
 
+            // Set up disconnect handling to mark as disconnected but not remove
             const disconnectRef = onDisconnect(userRef);
-            await disconnectRef.set({
-                nickname: nickname,
-                stage: 'initialization',
-                lastSeen: serverTimestamp(),
-                disconnected: true
+            await disconnectRef.update({
+                disconnected: true,
+                lastSeen: serverTimestamp()
             });
+        }
+
+        async function checkCurrentState() {
+            try {
+                // Check if already marked as ready
+                const readyRef = ref(db, `session/initialization/ready/${nickname}`);
+                const readySnapshot = await get(readyRef);
+
+                if (readySnapshot.exists()) {
+                    isMarkedReady = true;
+
+                    // Check if already confirmed
+                    const confirmRef = ref(db, `session/initialization/confirmed/${nickname}`);
+                    const confirmSnapshot = await get(confirmRef);
+
+                    if (confirmSnapshot.exists()) {
+                        hasConfirmedProceed = true;
+                    }
+
+                    showWaitingScreen();
+                } else {
+                    showIntroScreen();
+                }
+            } catch (error) {
+                console.error('Failed to check current state:', error);
+                showIntroScreen();
+            }
+        }
+
+        function showIntroScreen() {
+            document.getElementById('session-count').textContent = sessionParticipants.length;
+            showSection('intro-section');
         }
 
         function showWaitingScreen() {
@@ -302,12 +296,13 @@
             readyBtn.textContent = 'Регистрация...';
 
             try {
-                const readyRef = ref(db, `session/stages/initialization/ready/${nickname}`);
+                const readyRef = ref(db, `session/initialization/ready/${nickname}`);
                 await set(readyRef, {
                     nickname: nickname,
                     timestamp: serverTimestamp()
                 });
 
+                // Set up disconnect handling
                 const disconnectRef = onDisconnect(readyRef);
                 await disconnectRef.remove();
 
@@ -330,12 +325,13 @@
             proceedBtn.textContent = 'Подтверждение...';
 
             try {
-                const confirmRef = ref(db, `session/stages/initialization/confirmed/${nickname}`);
+                const confirmRef = ref(db, `session/initialization/confirmed/${nickname}`);
                 await set(confirmRef, {
                     nickname: nickname,
                     timestamp: serverTimestamp()
                 });
 
+                // Set up disconnect handling
                 const disconnectRef = onDisconnect(confirmRef);
                 await disconnectRef.remove();
 
@@ -350,29 +346,27 @@
         }
 
         function setupListener() {
-            const stageRef = ref(db, 'session/stages/initialization');
-            unsubscribe = onValue(stageRef, (snapshot) => {
-                if (snapshot.exists()) {
-                    const stageData = snapshot.val();
-                    updateDisplay(stageData);
-                } else {
-                    updateDisplay({});
-                }
+            // Listen to the entire initialization stage data
+            const initRef = ref(db, 'session/initialization');
+            unsubscribe = onValue(initRef, (snapshot) => {
+                const initData = snapshot.exists() ? snapshot.val() : {};
+                updateDisplay(initData);
             }, (error) => {
-                console.error('Stage listener error:', error);
+                console.error('Initialization listener error:', error);
                 showError('Потеряно соединение с сервером');
             });
         }
 
-        function updateDisplay(stageData) {
-            const ready = stageData.ready || {};
-            const confirmed = stageData.confirmed || {};
-            const totalParticipants = stageData.totalParticipants || sessionParticipants.length;
-            const participantsList = stageData.participantsList || sessionParticipants;
+        function updateDisplay(initData) {
+            const ready = initData.ready || {};
+            const confirmed = initData.confirmed || {};
 
+            const totalParticipants = sessionParticipants.length;
             const readyCount = Object.keys(ready).length;
             const confirmedCount = Object.keys(confirmed).length;
 
+            // Update counts
+            document.getElementById('total-session-count').textContent = totalParticipants;
             document.getElementById('ready-count').textContent = readyCount;
             document.getElementById('total-count').textContent = totalParticipants;
 
@@ -380,6 +374,7 @@
             const userListsElement = document.getElementById('user-lists');
             userListsElement.innerHTML = '';
 
+            // Show ready users
             if (readyCount > 0) {
                 const readyDiv = document.createElement('div');
                 readyDiv.innerHTML = '<div class="terminal-line" style="color: #66ff66; margin-top: 15px;"><strong>Готовы:</strong></div>';
@@ -393,7 +388,8 @@
                 });
             }
 
-            const waitingUsers = participantsList.filter(name => !ready[name]);
+            // Show waiting users
+            const waitingUsers = sessionParticipants.filter(name => !ready[name]);
             if (waitingUsers.length > 0) {
                 const waitingDiv = document.createElement('div');
                 waitingDiv.innerHTML = '<div class="terminal-line" style="color: #ffaa66; margin-top: 15px;"><strong>Ожидаем:</strong></div>';
@@ -407,21 +403,22 @@
                 });
             }
 
-            // Show confirmation section if everyone is ready
+            // Handle all ready state
             const allReadyMessage = document.getElementById('all-ready-message');
-            if (totalParticipants > 0 && readyCount === totalParticipants) {
+            if (readyCount === totalParticipants && totalParticipants > 0) {
                 allReadyMessage.classList.remove('hidden');
 
                 // Update confirmation status
                 const confirmStatusElement = document.getElementById('confirm-status');
                 if (confirmedCount > 0) {
+                    const confirmList = Object.keys(confirmed).map(name => `<div class="ready-user">→ ${name}</div>`).join('');
                     confirmStatusElement.innerHTML = `
                             <div class="terminal-line" style="color: #66ff66;">Подтвердили переход: ${confirmedCount}/${totalParticipants}</div>
-                            ${Object.keys(confirmed).map(name => `<div class="ready-user">→ ${name}</div>`).join('')}
+                            ${confirmList}
                         `;
 
+                    // Check if everyone confirmed
                     if (confirmedCount === totalParticipants) {
-                        // Everyone confirmed - proceed
                         setTimeout(() => {
                             proceedToNextStage();
                         }, 1000);
@@ -430,11 +427,12 @@
                     confirmStatusElement.innerHTML = '<div class="terminal-line" style="color: #ffaa66;">Ожидаем подтверждения от всех участников</div>';
                 }
 
-                // Update button state
+                // Update proceed button
                 const proceedBtn = document.getElementById('proceed-btn');
                 if (hasConfirmedProceed) {
                     proceedBtn.disabled = true;
                     proceedBtn.textContent = 'Подтверждено ✓';
+                    proceedBtn.style.backgroundColor = '#66ff66';
                 }
             } else {
                 allReadyMessage.classList.add('hidden');
@@ -465,7 +463,6 @@
             btn.disabled = true;
             btn.textContent = 'Переподключение...';
 
-            // Reset state
             isMarkedReady = false;
             hasConfirmedProceed = false;
 

@@ -261,10 +261,34 @@
             }, 500);
         }
 
-        function proceedToStart() {
+        async function proceedToStart() {
             const btn = document.getElementById('proceed-btn');
             btn.disabled = true;
             btn.textContent = 'Переход...';
+
+            // CRITICAL: Establish quest participants list for subsequent stages
+            try {
+                const usersRef = ref(db, 'session/users');
+                const snapshot = await get(usersRef);
+                if (snapshot.exists()) {
+                    const currentUsers = snapshot.val();
+                    const questParticipantsRef = ref(db, 'session/quest_participants');
+                    const questParticipants = {};
+
+                    Object.keys(currentUsers).forEach(name => {
+                        questParticipants[name] = {
+                            nickname: name,
+                            joinedAt: serverTimestamp(),
+                            stage: 'recognition'
+                        };
+                    });
+
+                    await set(questParticipantsRef, questParticipants);
+                }
+            } catch (error) {
+                console.error('Failed to establish quest participants:', error);
+            }
+
             window.location.href = `initialization.html?nickname=${encodeURIComponent(nickname)}`;
         }
 
