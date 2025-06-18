@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -128,7 +127,9 @@
 
             <div id="all-ready-message" class="hidden">
                 <div class="terminal-line" style="color: #66ff66; margin-top: 15px;">Все участники готовы!</div>
-                <button onclick="proceedToNextStage()" id="proceed-btn">Начать процесс</button>
+                <div class="terminal-line" style="color: #ffaa66;">Каждый участник должен подтвердить переход</div>
+                <button onclick="confirmProceed()" id="proceed-btn">Подтвердить переход</button>
+                <div id="confirm-status" style="margin-top: 10px;"></div>
             </div>
         </div>
     </div>
@@ -149,7 +150,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -163,7 +164,9 @@
 
         let app, db, nickname;
         let isMarkedReady = false;
+        let hasConfirmedProceed = false;
         let unsubscribe = null;
+        let sessionParticipants = [];
 
         async function initialize() {
             try {
@@ -178,21 +181,95 @@
                     return;
                 }
 
+                // Get the list of participants from recognition stage
+                await getSessionParticipants();
+
                 await updateUserStage();
+                await initializeStageTracking();
 
-                // Check if already ready
-                const readyRef = ref(db, `session/ready/${nickname}`);
-                const readySnapshot = await get(readyRef);
+                // Check current state
+                const initStateRef = ref(db, `session/stages/initialization`);
+                const stateSnapshot = await get(initStateRef);
+                const currentState = stateSnapshot.val() || {};
 
-                if (readySnapshot.exists()) {
+                if (currentState.ready && currentState.ready[nickname]) {
+                    isMarkedReady = true;
+                    if (currentState.confirmed && currentState.confirmed[nickname]) {
+                        hasConfirmedProceed = true;
+                    }
                     showWaitingScreen();
                 } else {
                     showSection('intro-section');
                 }
 
+                setupListener();
+
             } catch (error) {
                 console.error('Initialization failed:', error);
                 showError('Не удалось подключиться к системе');
+            }
+        }
+
+        async function getSessionParticipants() {
+            try {
+                // Get participants who were in recognition stage
+                const participantsRef = ref(db, 'session/participants');
+                const snapshot = await get(participantsRef);
+
+                if (snapshot.exists()) {
+                    sessionParticipants = Object.keys(snapshot.val());
+                } else {
+                    // Fallback: check current users if participants list doesn't exist
+                    const usersRef = ref(db, 'session/users');
+                    const usersSnapshot = await get(usersRef);
+                    if (usersSnapshot.exists()) {
+                        sessionParticipants = Object.keys(usersSnapshot.val());
+                    }
+                }
+
+                // Ensure current user is in the list
+                if (!sessionParticipants.includes(nickname)) {
+                    sessionParticipants.push(nickname);
+                }
+
+                // Update the participants list to include current stage
+                const participantsRef = ref(db, 'session/participants');
+                const participantsData = {};
+                sessionParticipants.forEach(name => {
+                    participantsData[name] = {
+                        nickname: name,
+                        joinedAt: serverTimestamp()
+                    };
+                });
+                await set(participantsRef, participantsData);
+
+            } catch (error) {
+                console.error('Failed to get session participants:', error);
+                sessionParticipants = [nickname]; // Fallback to just current user
+            }
+        }
+
+        async function initializeStageTracking() {
+            const stageRef = ref(db, `session/stages/initialization`);
+            const snapshot = await get(stageRef);
+
+            if (!snapshot.exists()) {
+                await set(stageRef, {
+                    ready: {},
+                    confirmed: {},
+                    totalParticipants: sessionParticipants.length,
+                    participantsList: sessionParticipants,
+                    createdAt: serverTimestamp()
+                });
+            } else {
+                // Update participant count if it's different
+                const currentData = snapshot.val();
+                if (currentData.totalParticipants !== sessionParticipants.length) {
+                    await update(stageRef, {
+                        totalParticipants: sessionParticipants.length,
+                        participantsList: sessionParticipants
+                    });
+                }
             }
         }
 
@@ -205,13 +282,16 @@
             });
 
             const disconnectRef = onDisconnect(userRef);
-            await disconnectRef.remove();
+            await disconnectRef.set({
+                nickname: nickname,
+                stage: 'initialization',
+                lastSeen: serverTimestamp(),
+                disconnected: true
+            });
         }
 
         function showWaitingScreen() {
-            isMarkedReady = true;
             showSection('waiting');
-            setupListener();
         }
 
         async function markReady() {
@@ -222,7 +302,7 @@
             readyBtn.textContent = 'Регистрация...';
 
             try {
-                const readyRef = ref(db, `session/ready/${nickname}`);
+                const readyRef = ref(db, `session/stages/initialization/ready/${nickname}`);
                 await set(readyRef, {
                     nickname: nickname,
                     timestamp: serverTimestamp()
@@ -231,6 +311,7 @@
                 const disconnectRef = onDisconnect(readyRef);
                 await disconnectRef.remove();
 
+                isMarkedReady = true;
                 showWaitingScreen();
 
             } catch (error) {
@@ -241,33 +322,59 @@
             }
         }
 
-        function setupListener() {
-            // Listen to all session data
-            const sessionRef = ref(db, 'session');
-            unsubscribe = onValue(sessionRef, (snapshot) => {
-                if (snapshot.exists()) {
-                    const sessionData = snapshot.val();
-                    const users = sessionData.users || {};
-                    const ready = sessionData.ready || {};
+        async function confirmProceed() {
+            if (hasConfirmedProceed) return;
 
-                    updateDisplay(users, ready);
+            const proceedBtn = document.getElementById('proceed-btn');
+            proceedBtn.disabled = true;
+            proceedBtn.textContent = 'Подтверждение...';
+
+            try {
+                const confirmRef = ref(db, `session/stages/initialization/confirmed/${nickname}`);
+                await set(confirmRef, {
+                    nickname: nickname,
+                    timestamp: serverTimestamp()
+                });
+
+                const disconnectRef = onDisconnect(confirmRef);
+                await disconnectRef.remove();
+
+                hasConfirmedProceed = true;
+
+            } catch (error) {
+                console.error('Confirm proceed failed:', error);
+                proceedBtn.disabled = false;
+                proceedBtn.textContent = 'Подтвердить переход';
+                showError('Не удалось подтвердить переход');
+            }
+        }
+
+        function setupListener() {
+            const stageRef = ref(db, 'session/stages/initialization');
+            unsubscribe = onValue(stageRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const stageData = snapshot.val();
+                    updateDisplay(stageData);
                 } else {
-                    updateDisplay({}, {});
+                    updateDisplay({});
                 }
             }, (error) => {
-                console.error('Session listener error:', error);
+                console.error('Stage listener error:', error);
                 showError('Потеряно соединение с сервером');
             });
         }
 
-        function updateDisplay(allUsers, readyUsers) {
-            // Filter users in initialization stage
-            const initUsers = Object.values(allUsers).filter(user => user.stage === 'initialization');
-            const totalCount = initUsers.length;
-            const readyCount = Object.keys(readyUsers).length;
+        function updateDisplay(stageData) {
+            const ready = stageData.ready || {};
+            const confirmed = stageData.confirmed || {};
+            const totalParticipants = stageData.totalParticipants || sessionParticipants.length;
+            const participantsList = stageData.participantsList || sessionParticipants;
+
+            const readyCount = Object.keys(ready).length;
+            const confirmedCount = Object.keys(confirmed).length;
 
             document.getElementById('ready-count').textContent = readyCount;
-            document.getElementById('total-count').textContent = totalCount;
+            document.getElementById('total-count').textContent = totalParticipants;
 
             // Update user lists
             const userListsElement = document.getElementById('user-lists');
@@ -278,7 +385,7 @@
                 readyDiv.innerHTML = '<div class="terminal-line" style="color: #66ff66; margin-top: 15px;"><strong>Готовы:</strong></div>';
                 userListsElement.appendChild(readyDiv);
 
-                Object.keys(readyUsers).forEach(name => {
+                Object.keys(ready).forEach(name => {
                     const userDiv = document.createElement('div');
                     userDiv.className = 'ready-user';
                     userDiv.textContent = `→ ${name}`;
@@ -286,34 +393,55 @@
                 });
             }
 
-            const waitingUsers = initUsers.filter(user => !readyUsers[user.nickname]);
+            const waitingUsers = participantsList.filter(name => !ready[name]);
             if (waitingUsers.length > 0) {
                 const waitingDiv = document.createElement('div');
                 waitingDiv.innerHTML = '<div class="terminal-line" style="color: #ffaa66; margin-top: 15px;"><strong>Ожидаем:</strong></div>';
                 userListsElement.appendChild(waitingDiv);
 
-                waitingUsers.forEach(user => {
+                waitingUsers.forEach(name => {
                     const userDiv = document.createElement('div');
                     userDiv.className = 'waiting-user';
-                    userDiv.textContent = `→ ${user.nickname}`;
+                    userDiv.textContent = `→ ${name}`;
                     userListsElement.appendChild(userDiv);
                 });
             }
 
-            // Show proceed button if everyone is ready
+            // Show confirmation section if everyone is ready
             const allReadyMessage = document.getElementById('all-ready-message');
-            if (totalCount > 0 && readyCount === totalCount) {
+            if (totalParticipants > 0 && readyCount === totalParticipants) {
                 allReadyMessage.classList.remove('hidden');
+
+                // Update confirmation status
+                const confirmStatusElement = document.getElementById('confirm-status');
+                if (confirmedCount > 0) {
+                    confirmStatusElement.innerHTML = `
+                            <div class="terminal-line" style="color: #66ff66;">Подтвердили переход: ${confirmedCount}/${totalParticipants}</div>
+                            ${Object.keys(confirmed).map(name => `<div class="ready-user">→ ${name}</div>`).join('')}
+                        `;
+
+                    if (confirmedCount === totalParticipants) {
+                        // Everyone confirmed - proceed
+                        setTimeout(() => {
+                            proceedToNextStage();
+                        }, 1000);
+                    }
+                } else {
+                    confirmStatusElement.innerHTML = '<div class="terminal-line" style="color: #ffaa66;">Ожидаем подтверждения от всех участников</div>';
+                }
+
+                // Update button state
+                const proceedBtn = document.getElementById('proceed-btn');
+                if (hasConfirmedProceed) {
+                    proceedBtn.disabled = true;
+                    proceedBtn.textContent = 'Подтверждено ✓';
+                }
             } else {
                 allReadyMessage.classList.add('hidden');
             }
         }
 
         function proceedToNextStage() {
-            const btn = document.getElementById('proceed-btn');
-            btn.disabled = true;
-            btn.textContent = 'Переход...';
-
             showSection('success-section');
             setTimeout(() => {
                 window.location.href = `stage1.html?nickname=${encodeURIComponent(nickname)}`;
@@ -339,6 +467,7 @@
 
             // Reset state
             isMarkedReady = false;
+            hasConfirmedProceed = false;
 
             setTimeout(async () => {
                 try {
@@ -360,8 +489,8 @@
 
         // Global functions
         window.markReady = markReady;
+        window.confirmProceed = confirmProceed;
         window.reconnect = reconnect;
-        window.proceedToNextStage = proceedToNextStage;
 
         // Event listeners
         window.addEventListener('beforeunload', cleanup);
