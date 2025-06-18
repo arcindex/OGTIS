@@ -227,7 +227,34 @@
                     console.log('Session participants:', sessionParticipants);
                     return true;
                 } else {
-                    // No session found - redirect back to start
+                    // No session found - check if we can get it from active users
+                    const usersRef = ref(db, 'session/users');
+                    const usersSnapshot = await get(usersRef);
+
+                    if (usersSnapshot.exists()) {
+                        const activeUsers = usersSnapshot.val();
+                        sessionParticipants = Object.keys(activeUsers);
+
+                        if (!sessionParticipants.includes(nickname)) {
+                            return false;
+                        }
+
+                        // Create quest_participants if it doesn't exist
+                        const questParticipantsRef = ref(db, 'session/quest_participants');
+                        const questParticipants = {};
+
+                        sessionParticipants.forEach(name => {
+                            questParticipants[name] = {
+                                nickname: name,
+                                joinedAt: serverTimestamp(),
+                                stage: 'initialization'
+                            };
+                        });
+
+                        await set(questParticipantsRef, questParticipants);
+                        return true;
+                    }
+
                     return false;
                 }
             } catch (error) {
@@ -413,9 +440,9 @@
                 if (confirmedCount > 0) {
                     const confirmList = Object.keys(confirmed).map(name => `<div class="ready-user">→ ${name}</div>`).join('');
                     confirmStatusElement.innerHTML = `
-                            <div class="terminal-line" style="color: #66ff66;">Подтвердили переход: ${confirmedCount}/${totalParticipants}</div>
-                            ${confirmList}
-                        `;
+                                <div class="terminal-line" style="color: #66ff66;">Подтвердили переход: ${confirmedCount}/${totalParticipants}</div>
+                                ${confirmList}
+                            `;
 
                     // Check if everyone confirmed
                     if (confirmedCount === totalParticipants) {
