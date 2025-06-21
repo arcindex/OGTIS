@@ -93,19 +93,45 @@
                 transform: translateY(0);
             }
         }
+
+        .typewriter {
+            overflow: hidden;
+            border-right: 2px solid #00ffcc;
+            white-space: nowrap;
+            margin: 0 auto;
+            animation: typing 3s steps(40, end), blink-caret 0.75s step-end infinite;
+        }
+
+        @keyframes typing {
+            from {
+                width: 0
+            }
+
+            to {
+                width: 100%
+            }
+        }
+
+        @keyframes blink-caret {
+            from, to {
+                border-color: transparent
+            }
+
+            50% {
+                border-color: #00ffcc;
+            }
+        }
     </style>
 </head>
 <body>
     <div id="waiting-section" class="section">
         <div class="terminal-line">Ты пока здесь один, <span id="waiting-nickname"></span>...</div>
         <div class="terminal-line">Ожидаем других участников<span class="blinking"></span></div>
-        <div class="terminal-line">Участников: <strong><span id="participant-count">1</span></strong> / <strong>3</strong> (минимум)</div>
     </div>
 
     <div id="recognition-section" class="section hidden">
         <div class="terminal-line"><span id="recognition-nickname"></span>, смотри, кто-то ещё зашёл:</div>
         <div id="user-list" class="user-list"></div>
-        <div class="terminal-line">Всего участников: <strong><span id="total-participants">0</span></strong></div>
         <div id="question">
             <div class="question-container fade-in">
                 <div class="terminal-line">Ты узнаёшь их?</div>
@@ -116,13 +142,13 @@
     </div>
 
     <div id="post-question" class="section hidden">
-        <div class="terminal-line fade-in" id="answer-text"></div>
-        <div class="terminal-line">Тем не менее вас всех что-то объединяет...</div>
-        <div class="terminal-line">Ух... не пейте кофе... оно не поможет вспомнить...</div>
-        <div class="terminal-line">Я пройдусь по каждому из вас...</div>
-        <div class="terminal-line">Вы вместе пройдёте весь путь...</div>
-        <div class="terminal-line">Выявим вместе... кто вы...</div>
-        <button onclick="proceedToStart()" id="proceed-btn">Перейти к подготовке</button>
+        <div class="terminal-line" id="answer-text"></div>
+        <div class="terminal-line hidden" id="line1">Тем не менее вас всех что-то объединяет...</div>
+        <div class="terminal-line hidden" id="line2">Ух... не пейте кофе... оно не поможет вспомнить...</div>
+        <div class="terminal-line hidden" id="line3">Я пройдусь по каждому из вас...</div>
+        <div class="terminal-line hidden" id="line4">Вы вместе пройдёте весь путь...</div>
+        <div class="terminal-line hidden" id="line5">Выявим вместе... кто вы...</div>
+        <button onclick="proceedToStart()" id="proceed-btn" class="hidden">Перейти к подготовке</button>
     </div>
 
     <div id="error-section" class="section hidden">
@@ -257,34 +283,54 @@
         async function updateQuestParticipants() {
             try {
                 const questRef = ref(db, 'session/quest_participants');
+                const questSnapshot = await get(questRef);
+                const existingQuest = questSnapshot.exists() ? questSnapshot.val() : {};
+
                 const updates = {};
 
+                // Update quest participants with current users, but preserve existing data
                 Object.keys(currentUsers).forEach(name => {
-                    updates[name] = {
-                        nickname: name,
-                        stage: currentUsers[name].stage || 'recognition',
-                        lastSeen: serverTimestamp(),
-                        joinedAt: currentUsers[name].joinedAt || serverTimestamp()
-                    };
+                    // Only update if user doesn't exist in quest or needs stage update
+                    if (!existingQuest[name] || existingQuest[name].stage !== (currentUsers[name].stage || 'recognition')) {
+                        updates[name] = {
+                            nickname: name,
+                            stage: currentUsers[name].stage || 'recognition',
+                            lastSeen: serverTimestamp(),
+                            joinedAt: existingQuest[name]?.joinedAt || currentUsers[name].joinedAt || serverTimestamp(),
+                            disconnected: false
+                        };
+                    } else {
+                        // Just update lastSeen and mark as not disconnected
+                        updates[name] = {
+                            ...existingQuest[name],
+                            lastSeen: serverTimestamp(),
+                            disconnected: false
+                        };
+                    }
                 });
 
-                await update(questRef, updates);
+                if (Object.keys(updates).length > 0) {
+                    await update(questRef, updates);
+                }
             } catch (error) {
                 console.error('Failed to update quest participants:', error);
             }
         }
 
         function updateDisplay(otherUsers) {
-            const totalCount = otherUsers.length + 1;
+            // Filter out users who are transitioning to other stages
+            const recognitionUsers = otherUsers.filter(name => {
+                const user = currentUsers[name];
+                // Only count users in recognition stage or moving to initialization
+                return user && (user.stage === 'recognition' || user.stage === 'moving_to_initialization');
+            });
 
-            // Update participant counts
-            document.getElementById('participant-count').textContent = totalCount;
-            document.getElementById('total-participants').textContent = totalCount;
+            const totalCount = recognitionUsers.length + 1;
 
             if (totalCount < MIN_PARTICIPANTS) {
                 showSection('waiting-section');
             } else if (!hasAnswered) {
-                showUserList(otherUsers);
+                showUserList(recognitionUsers);
                 showSection('recognition-section');
             }
         }
@@ -313,7 +359,26 @@
             showSection('error-section');
         }
 
-        function answer(recognize) {
+        function typewriterEffect(element, text, speed = 50) {
+            return new Promise((resolve) => {
+                let i = 0;
+                element.textContent = '';
+                element.classList.remove('hidden');
+
+                function type() {
+                    if (i < text.length) {
+                        element.textContent += text.charAt(i);
+                        i++;
+                        setTimeout(type, speed);
+                    } else {
+                        resolve();
+                    }
+                }
+                type();
+            });
+        }
+
+        async function answer(recognize) {
             if (hasAnswered) return;
             hasAnswered = true;
 
@@ -325,11 +390,34 @@
                 ? "А я... тяжело... надо пройтись по каждому..."
                 : "Я тоже... нужно больше информации...";
 
-            document.getElementById("answer-text").textContent = answerText;
+            // Show post-question section
+            showSection('post-question');
 
-            setTimeout(() => {
-                showSection('post-question');
-            }, 500);
+            // Type the answer text
+            const answerElement = document.getElementById("answer-text");
+            await typewriterEffect(answerElement, answerText, 60);
+
+            // Wait a bit before showing next lines
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Type each line sequentially
+            const lines = [
+                { id: 'line1', text: 'Тем не менее вас всех что-то объединяет...', speed: 50 },
+                { id: 'line2', text: 'Ух... не пейте кофе... оно не поможет вспомнить...', speed: 60 },
+                { id: 'line3', text: 'Я пройдусь по каждому из вас...', speed: 70 },
+                { id: 'line4', text: 'Вы вместе пройдёте весь путь...', speed: 55 },
+                { id: 'line5', text: 'Выявим вместе... кто вы...', speed: 80 }
+            ];
+
+            for (let line of lines) {
+                await new Promise(resolve => setTimeout(resolve, 800));
+                const element = document.getElementById(line.id);
+                await typewriterEffect(element, line.text, line.speed);
+            }
+
+            // Show the proceed button after all text is typed
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            document.getElementById('proceed-btn').classList.remove('hidden');
         }
 
         async function proceedToStart() {

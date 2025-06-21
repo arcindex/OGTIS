@@ -99,6 +99,11 @@
             color: #ffaa66;
         }
 
+        .transitioning-user {
+            margin: 5px 0;
+            color: #88ccff;
+        }
+
         .offline-user {
             margin: 5px 0;
             color: #ff6666;
@@ -119,6 +124,34 @@
                 transform: translateY(0);
             }
         }
+
+        .typewriter {
+            overflow: hidden;
+            border-right: 2px solid #00ffcc;
+            white-space: nowrap;
+            margin: 0 auto;
+            animation: typing 2s steps(40, end), blink-caret 0.75s step-end infinite;
+        }
+
+        @keyframes typing {
+            from {
+                width: 0
+            }
+
+            to {
+                width: 100%
+            }
+        }
+
+        @keyframes blink-caret {
+            from, to {
+                border-color: transparent
+            }
+
+            50% {
+                border-color: #00ffcc;
+            }
+        }
     </style>
 </head>
 <body>
@@ -128,11 +161,11 @@
     </div>
 
     <div id="intro-section" class="section hidden">
-        <div class="terminal-line">Выявим вместе... кто вы...</div>
-        <div class="terminal-line">Система восстановления памяти готова к инициализации.</div>
-        <div class="terminal-line">Участников в сессии: <strong><span id="session-count">0</span></strong></div>
-        <div class="terminal-line">Нажмите готов, когда будете готовы начать процесс.</div>
-        <button onclick="markReady()" id="ready-btn">Готов начать</button>
+        <div class="terminal-line" id="intro-text"></div>
+        <div class="terminal-line hidden" id="system-ready-text">Система восстановления памяти готова к инициализации.</div>
+        <div class="terminal-line hidden" id="session-info">Участников в сессии: <strong><span id="session-count">0</span></strong></div>
+        <div class="terminal-line hidden" id="ready-instruction">Нажмите готов, когда будете готовы начать процесс.</div>
+        <button onclick="markReady()" id="ready-btn" class="hidden">Готов начать</button>
     </div>
 
     <div id="waiting" class="section hidden">
@@ -211,7 +244,7 @@
                     return;
                 }
 
-                // Update user stage
+                // Update user stage properly
                 await updateUserStage();
 
                 // Check current ready/confirm state
@@ -228,11 +261,11 @@
 
         async function verifyAndSetupParticipant() {
             try {
-                // First check if there's an existing quest_participants list
+                // Check quest_participants (main session record)
                 const questRef = ref(db, 'session/quest_participants');
                 const questSnapshot = await get(questRef);
 
-                // Also check current active users
+                // Check current active users (temporary connection record)
                 const usersRef = ref(db, 'session/users');
                 const usersSnapshot = await get(usersRef);
 
@@ -252,63 +285,45 @@
                         participantFound = true;
                     }
 
-                    // Update quest participants with current active users
-                    const updates = {};
-                    Object.keys(currentUsers).forEach(name => {
-                        if (!questParticipants[name]) {
-                            updates[name] = {
-                                nickname: name,
-                                joinedAt: serverTimestamp(),
-                                stage: 'initialization',
-                                lastSeen: serverTimestamp()
-                            };
-                        }
-                    });
-
-                    if (Object.keys(updates).length > 0) {
-                        await update(questRef, updates);
-                        sessionParticipants = [...sessionParticipants, ...Object.keys(updates)];
+                    // Ensure user record exists in quest_participants
+                    if (participantFound && !questParticipants[nickname]) {
+                        await set(ref(db, `session/quest_participants/${nickname}`), {
+                            nickname: nickname,
+                            joinedAt: serverTimestamp(),
+                            stage: 'initialization',
+                            lastSeen: serverTimestamp()
+                        });
                     }
 
                 } else {
-                    // No quest participants exist, create from current users
-                    if (Object.keys(currentUsers).length >= MIN_PARTICIPANTS) {
-                        const questParticipants = {};
-                        Object.keys(currentUsers).forEach(name => {
-                            questParticipants[name] = {
-                                nickname: name,
-                                joinedAt: serverTimestamp(),
-                                stage: 'initialization',
-                                lastSeen: serverTimestamp()
-                            };
-                        });
-
-                        await set(questRef, questParticipants);
-                        sessionParticipants = Object.keys(questParticipants);
-                        participantFound = sessionParticipants.includes(nickname);
-                    }
+                    // No quest participants exist - something went wrong
+                    console.error('No quest participants found');
+                    return false;
                 }
 
-                // If not found in quest participants, try to add if there are enough total participants
-                if (!participantFound && Object.keys(currentUsers).length >= MIN_PARTICIPANTS) {
-                    const userRef = ref(db, `session/quest_participants/${nickname}`);
+                // Create/update user record for real-time presence
+                if (participantFound) {
+                    const userRef = ref(db, `session/users/${nickname}`);
                     await set(userRef, {
                         nickname: nickname,
-                        joinedAt: serverTimestamp(),
                         stage: 'initialization',
-                        lastSeen: serverTimestamp()
+                        lastSeen: serverTimestamp(),
+                        joinedAt: serverTimestamp()
                     });
 
-                    if (!sessionParticipants.includes(nickname)) {
-                        sessionParticipants.push(nickname);
-                    }
-                    participantFound = true;
+                    // Set up disconnect handling for users (temporary record)
+                    const disconnectUserRef = onDisconnect(userRef);
+                    await disconnectUserRef.remove();
                 }
 
-                // Update active participants list
-                activeParticipants = sessionParticipants.filter(name =>
-                    currentUsers[name] && !currentUsers[name].disconnected
-                );
+                // Update active participants list based on quest participants who are currently online
+                activeParticipants = sessionParticipants.filter(name => {
+                    const questData = questSnapshot.exists() ? questSnapshot.val()[name] : null;
+                    const userData = currentUsers[name];
+
+                    // Consider active if they're in users table OR not marked as disconnected in quest
+                    return userData || (questData && !questData.disconnected);
+                });
 
                 console.log('Session participants:', sessionParticipants);
                 console.log('Active participants:', activeParticipants);
@@ -323,7 +338,7 @@
 
         async function updateUserStage() {
             try {
-                // Update in quest participants
+                // Update in quest participants (permanent record)
                 const questUserRef = ref(db, `session/quest_participants/${nickname}`);
                 await update(questUserRef, {
                     stage: 'initialization',
@@ -331,23 +346,25 @@
                     disconnected: false
                 });
 
-                // Update in users if exists
-                const usersRef = ref(db, 'session/users');
-                const usersSnapshot = await get(usersRef);
-                if (usersSnapshot.exists() && usersSnapshot.val()[nickname]) {
-                    const userRef = ref(db, `session/users/${nickname}`);
-                    await update(userRef, {
-                        stage: 'initialization',
-                        lastSeen: serverTimestamp()
-                    });
-                }
+                // Update in users (temporary presence record)
+                const userRef = ref(db, `session/users/${nickname}`);
+                await set(userRef, {
+                    nickname: nickname,
+                    stage: 'initialization',
+                    lastSeen: serverTimestamp(),
+                    joinedAt: serverTimestamp()
+                });
 
-                // Set up disconnect handling
-                const disconnectRef = onDisconnect(ref(db, `session/quest_participants/${nickname}`));
-                await disconnectRef.update({
+                // Set up disconnect handling for quest participants
+                const disconnectQuestRef = onDisconnect(questUserRef);
+                await disconnectQuestRef.update({
                     disconnected: true,
                     lastSeen: serverTimestamp()
                 });
+
+                // Set up disconnect handling for users
+                const disconnectUserRef = onDisconnect(userRef);
+                await disconnectUserRef.remove();
 
             } catch (error) {
                 console.error('Failed to update user stage:', error);
@@ -373,17 +390,57 @@
 
                     showWaitingScreen();
                 } else {
-                    showIntroScreen();
+                    await showIntroScreen();
                 }
             } catch (error) {
                 console.error('Failed to check current state:', error);
-                showIntroScreen();
+                await showIntroScreen();
             }
         }
 
-        function showIntroScreen() {
-            document.getElementById('session-count').textContent = sessionParticipants.length;
+        function typewriterEffect(element, text, speed = 50) {
+            return new Promise((resolve) => {
+                let i = 0;
+                element.textContent = '';
+                element.classList.remove('hidden');
+
+                function type() {
+                    if (i < text.length) {
+                        element.textContent += text.charAt(i);
+                        i++;
+                        setTimeout(type, speed);
+                    } else {
+                        resolve();
+                    }
+                }
+                type();
+            });
+        }
+
+        async function showIntroScreen() {
             showSection('intro-section');
+
+            // Typewriter effect for intro text
+            const introElement = document.getElementById('intro-text');
+            await typewriterEffect(introElement, 'Выявим вместе... кто вы...', 60);
+
+            await new Promise(resolve => setTimeout(resolve, 800));
+
+            // Show subsequent lines
+            const elements = [
+                { id: 'system-ready-text', delay: 600 },
+                { id: 'session-info', delay: 400 },
+                { id: 'ready-instruction', delay: 500 },
+                { id: 'ready-btn', delay: 300 }
+            ];
+
+            for (let el of elements) {
+                await new Promise(resolve => setTimeout(resolve, el.delay));
+                document.getElementById(el.id).classList.remove('hidden');
+            }
+
+            // Update session count
+            document.getElementById('session-count').textContent = sessionParticipants.length;
         }
 
         function showWaitingScreen() {
@@ -465,13 +522,22 @@
                     const questData = snapshot.val();
                     sessionParticipants = Object.keys(questData);
 
-                    // Update active participants (not disconnected)
-                    activeParticipants = sessionParticipants.filter(name =>
-                        !questData[name].disconnected
-                    );
+                    // Also check current users for real-time presence
+                    get(ref(db, 'session/users')).then((usersSnapshot) => {
+                        const currentUsers = usersSnapshot.exists() ? usersSnapshot.val() : {};
 
-                    console.log('Updated participants:', sessionParticipants);
-                    console.log('Active participants:', activeParticipants);
+                        // Update active participants (those in quest who are either online or not marked disconnected)
+                        activeParticipants = sessionParticipants.filter(name => {
+                            const questUser = questData[name];
+                            const currentUser = currentUsers[name];
+
+                            // Active if: currently online OR not marked as disconnected
+                            return currentUser || (questUser && !questUser.disconnected);
+                        });
+
+                        console.log('Updated participants:', sessionParticipants);
+                        console.log('Active participants:', activeParticipants);
+                    });
                 }
             }, (error) => {
                 console.error('Quest participants listener error:', error);
@@ -490,7 +556,7 @@
             // Update counts
             document.getElementById('total-session-count').textContent = totalParticipants;
             document.getElementById('ready-count').textContent = readyCount;
-            document.getElementById('total-count').textContent = totalParticipants;
+            document.getElementById('total-count').textContent = activeCount; // Use active count here
 
             // Update user lists
             const userListsElement = document.getElementById('user-lists');
@@ -525,22 +591,22 @@
                 });
             }
 
-            // Show offline users
-            const offlineUsers = sessionParticipants.filter(name => !activeParticipants.includes(name));
-            if (offlineUsers.length > 0) {
-                const offlineDiv = document.createElement('div');
-                offlineDiv.innerHTML = '<div class="terminal-line" style="color: #ff6666; margin-top: 15px;"><strong>Отключены:</strong></div>';
-                userListsElement.appendChild(offlineDiv);
+            // Show transitioning users (in session but not currently active - could be moving between stages)
+            const transitioningUsers = sessionParticipants.filter(name => !activeParticipants.includes(name));
+            if (transitioningUsers.length > 0) {
+                const transitionDiv = document.createElement('div');
+                transitionDiv.innerHTML = '<div class="terminal-line" style="color: #88ccff; margin-top: 15px;"><strong>В переходе:</strong></div>';
+                userListsElement.appendChild(transitionDiv);
 
-                offlineUsers.forEach(name => {
+                transitioningUsers.forEach(name => {
                     const userDiv = document.createElement('div');
-                    userDiv.className = 'offline-user';
-                    userDiv.textContent = `→ ${name} (отключен)`;
+                    userDiv.className = 'transitioning-user';
+                    userDiv.textContent = `→ ${name} (переходит...)`;
                     userListsElement.appendChild(userDiv);
                 });
             }
 
-            // Handle all ready state (only count active participants)
+            // Handle all ready state (only count active participants for initialization)
             const allReadyMessage = document.getElementById('all-ready-message');
             if (readyCount === activeCount && activeCount >= MIN_PARTICIPANTS) {
                 allReadyMessage.classList.remove('hidden');
@@ -550,9 +616,9 @@
                 if (confirmedCount > 0) {
                     const confirmList = Object.keys(confirmed).map(name => `<div class="ready-user">→ ${name}</div>`).join('');
                     confirmStatusElement.innerHTML = `
-                            <div class="terminal-line" style="color: #66ff66;">Подтвердили переход: ${confirmedCount}/${activeCount}</div>
-                            ${confirmList}
-                        `;
+                                <div class="terminal-line" style="color: #66ff66;">Подтвердили переход: ${confirmedCount}/${activeCount}</div>
+                                ${confirmList}
+                            `;
 
                     // Check if all active participants confirmed
                     if (confirmedCount === activeCount) {
