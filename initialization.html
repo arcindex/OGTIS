@@ -75,6 +75,13 @@
             border-color: #66ff66;
         }
 
+        .warning-message {
+            color: #ffaa66;
+            border: 1px solid #ffaa66;
+            padding: 15px;
+            margin: 10px 0;
+        }
+
         #ready-status {
             margin-top: 20px;
             padding: 15px;
@@ -90,6 +97,11 @@
         .waiting-user {
             margin: 5px 0;
             color: #ffaa66;
+        }
+
+        .offline-user {
+            margin: 5px 0;
+            color: #ff6666;
         }
 
         .fade-in {
@@ -157,7 +169,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp, update, remove } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -169,11 +181,15 @@
             databaseURL: "https://ogtis-e2e4b-default-rtdb.europe-west1.firebasedatabase.app/"
         };
 
+        const MIN_PARTICIPANTS = 3;
+
         let app, db, nickname;
         let isMarkedReady = false;
         let hasConfirmedProceed = false;
-        let unsubscribe = null;
+        let unsubscribeInit = null;
+        let unsubscribeQuest = null;
         let sessionParticipants = [];
+        let activeParticipants = [];
 
         async function initialize() {
             try {
@@ -188,21 +204,21 @@
                     return;
                 }
 
-                // Verify user was part of the session
-                const isValidParticipant = await verifySessionParticipant();
+                // Verify and setup session participation
+                const isValidParticipant = await verifyAndSetupParticipant();
                 if (!isValidParticipant) {
-                    showError('Вы не являетесь участником текущей сессии.');
+                    showError('Не удалось подключиться к сессии. Попробуйте начать заново.');
                     return;
                 }
 
-                // Update user stage but keep them in session tracking
+                // Update user stage
                 await updateUserStage();
 
                 // Check current ready/confirm state
                 await checkCurrentState();
 
                 // Start listening for updates
-                setupListener();
+                setupListeners();
 
             } catch (error) {
                 console.error('Initialization failed:', error);
@@ -210,53 +226,95 @@
             }
         }
 
-        async function verifySessionParticipant() {
+        async function verifyAndSetupParticipant() {
             try {
-                // Check if there's an active session from recognition stage
-                const sessionRef = ref(db, 'session/quest_participants');
-                const snapshot = await get(sessionRef);
+                // First check if there's an existing quest_participants list
+                const questRef = ref(db, 'session/quest_participants');
+                const questSnapshot = await get(questRef);
 
-                if (snapshot.exists()) {
-                    const questParticipants = snapshot.val();
+                // Also check current active users
+                const usersRef = ref(db, 'session/users');
+                const usersSnapshot = await get(usersRef);
+
+                let participantFound = false;
+                let currentUsers = {};
+
+                if (usersSnapshot.exists()) {
+                    currentUsers = usersSnapshot.val();
+                }
+
+                if (questSnapshot.exists()) {
+                    const questParticipants = questSnapshot.val();
                     sessionParticipants = Object.keys(questParticipants);
 
-                    if (!sessionParticipants.includes(nickname)) {
-                        return false;
+                    // Check if current user is in the quest participants
+                    if (sessionParticipants.includes(nickname)) {
+                        participantFound = true;
                     }
 
-                    console.log('Session participants:', sessionParticipants);
-                    return true;
-                } else {
-                    // No session found - check if we can get it from active users
-                    const usersRef = ref(db, 'session/users');
-                    const usersSnapshot = await get(usersRef);
-
-                    if (usersSnapshot.exists()) {
-                        const activeUsers = usersSnapshot.val();
-                        sessionParticipants = Object.keys(activeUsers);
-
-                        if (!sessionParticipants.includes(nickname)) {
-                            return false;
+                    // Update quest participants with current active users
+                    const updates = {};
+                    Object.keys(currentUsers).forEach(name => {
+                        if (!questParticipants[name]) {
+                            updates[name] = {
+                                nickname: name,
+                                joinedAt: serverTimestamp(),
+                                stage: 'initialization',
+                                lastSeen: serverTimestamp()
+                            };
                         }
+                    });
 
-                        // Create quest_participants if it doesn't exist
-                        const questParticipantsRef = ref(db, 'session/quest_participants');
+                    if (Object.keys(updates).length > 0) {
+                        await update(questRef, updates);
+                        sessionParticipants = [...sessionParticipants, ...Object.keys(updates)];
+                    }
+
+                } else {
+                    // No quest participants exist, create from current users
+                    if (Object.keys(currentUsers).length >= MIN_PARTICIPANTS) {
                         const questParticipants = {};
-
-                        sessionParticipants.forEach(name => {
+                        Object.keys(currentUsers).forEach(name => {
                             questParticipants[name] = {
                                 nickname: name,
                                 joinedAt: serverTimestamp(),
-                                stage: 'initialization'
+                                stage: 'initialization',
+                                lastSeen: serverTimestamp()
                             };
                         });
 
-                        await set(questParticipantsRef, questParticipants);
-                        return true;
+                        await set(questRef, questParticipants);
+                        sessionParticipants = Object.keys(questParticipants);
+                        participantFound = sessionParticipants.includes(nickname);
                     }
-
-                    return false;
                 }
+
+                // If not found in quest participants, try to add if there are enough total participants
+                if (!participantFound && Object.keys(currentUsers).length >= MIN_PARTICIPANTS) {
+                    const userRef = ref(db, `session/quest_participants/${nickname}`);
+                    await set(userRef, {
+                        nickname: nickname,
+                        joinedAt: serverTimestamp(),
+                        stage: 'initialization',
+                        lastSeen: serverTimestamp()
+                    });
+
+                    if (!sessionParticipants.includes(nickname)) {
+                        sessionParticipants.push(nickname);
+                    }
+                    participantFound = true;
+                }
+
+                // Update active participants list
+                activeParticipants = sessionParticipants.filter(name =>
+                    currentUsers[name] && !currentUsers[name].disconnected
+                );
+
+                console.log('Session participants:', sessionParticipants);
+                console.log('Active participants:', activeParticipants);
+
+                return participantFound && sessionParticipants.length >= MIN_PARTICIPANTS;
+
             } catch (error) {
                 console.error('Failed to verify session participant:', error);
                 return false;
@@ -264,19 +322,36 @@
         }
 
         async function updateUserStage() {
-            // Update user's current stage while keeping them in the main session
-            const userRef = ref(db, `session/quest_participants/${nickname}`);
-            await update(userRef, {
-                stage: 'initialization',
-                lastSeen: serverTimestamp()
-            });
+            try {
+                // Update in quest participants
+                const questUserRef = ref(db, `session/quest_participants/${nickname}`);
+                await update(questUserRef, {
+                    stage: 'initialization',
+                    lastSeen: serverTimestamp(),
+                    disconnected: false
+                });
 
-            // Set up disconnect handling to mark as disconnected but not remove
-            const disconnectRef = onDisconnect(userRef);
-            await disconnectRef.update({
-                disconnected: true,
-                lastSeen: serverTimestamp()
-            });
+                // Update in users if exists
+                const usersRef = ref(db, 'session/users');
+                const usersSnapshot = await get(usersRef);
+                if (usersSnapshot.exists() && usersSnapshot.val()[nickname]) {
+                    const userRef = ref(db, `session/users/${nickname}`);
+                    await update(userRef, {
+                        stage: 'initialization',
+                        lastSeen: serverTimestamp()
+                    });
+                }
+
+                // Set up disconnect handling
+                const disconnectRef = onDisconnect(ref(db, `session/quest_participants/${nickname}`));
+                await disconnectRef.update({
+                    disconnected: true,
+                    lastSeen: serverTimestamp()
+                });
+
+            } catch (error) {
+                console.error('Failed to update user stage:', error);
+            }
         }
 
         async function checkCurrentState() {
@@ -329,7 +404,7 @@
                     timestamp: serverTimestamp()
                 });
 
-                // Set up disconnect handling
+                // Set up disconnect handling for ready status
                 const disconnectRef = onDisconnect(readyRef);
                 await disconnectRef.remove();
 
@@ -358,7 +433,7 @@
                     timestamp: serverTimestamp()
                 });
 
-                // Set up disconnect handling
+                // Set up disconnect handling for confirmation
                 const disconnectRef = onDisconnect(confirmRef);
                 await disconnectRef.remove();
 
@@ -372,15 +447,34 @@
             }
         }
 
-        function setupListener() {
-            // Listen to the entire initialization stage data
+        function setupListeners() {
+            // Listen to initialization stage data
             const initRef = ref(db, 'session/initialization');
-            unsubscribe = onValue(initRef, (snapshot) => {
+            unsubscribeInit = onValue(initRef, (snapshot) => {
                 const initData = snapshot.exists() ? snapshot.val() : {};
                 updateDisplay(initData);
             }, (error) => {
                 console.error('Initialization listener error:', error);
                 showError('Потеряно соединение с сервером');
+            });
+
+            // Listen to quest participants for real-time updates
+            const questRef = ref(db, 'session/quest_participants');
+            unsubscribeQuest = onValue(questRef, (snapshot) => {
+                if (snapshot.exists()) {
+                    const questData = snapshot.val();
+                    sessionParticipants = Object.keys(questData);
+
+                    // Update active participants (not disconnected)
+                    activeParticipants = sessionParticipants.filter(name =>
+                        !questData[name].disconnected
+                    );
+
+                    console.log('Updated participants:', sessionParticipants);
+                    console.log('Active participants:', activeParticipants);
+                }
+            }, (error) => {
+                console.error('Quest participants listener error:', error);
             });
         }
 
@@ -389,6 +483,7 @@
             const confirmed = initData.confirmed || {};
 
             const totalParticipants = sessionParticipants.length;
+            const activeCount = activeParticipants.length;
             const readyCount = Object.keys(ready).length;
             const confirmedCount = Object.keys(confirmed).length;
 
@@ -415,8 +510,8 @@
                 });
             }
 
-            // Show waiting users
-            const waitingUsers = sessionParticipants.filter(name => !ready[name]);
+            // Show waiting users (active but not ready)
+            const waitingUsers = activeParticipants.filter(name => !ready[name]);
             if (waitingUsers.length > 0) {
                 const waitingDiv = document.createElement('div');
                 waitingDiv.innerHTML = '<div class="terminal-line" style="color: #ffaa66; margin-top: 15px;"><strong>Ожидаем:</strong></div>';
@@ -430,9 +525,24 @@
                 });
             }
 
-            // Handle all ready state
+            // Show offline users
+            const offlineUsers = sessionParticipants.filter(name => !activeParticipants.includes(name));
+            if (offlineUsers.length > 0) {
+                const offlineDiv = document.createElement('div');
+                offlineDiv.innerHTML = '<div class="terminal-line" style="color: #ff6666; margin-top: 15px;"><strong>Отключены:</strong></div>';
+                userListsElement.appendChild(offlineDiv);
+
+                offlineUsers.forEach(name => {
+                    const userDiv = document.createElement('div');
+                    userDiv.className = 'offline-user';
+                    userDiv.textContent = `→ ${name} (отключен)`;
+                    userListsElement.appendChild(userDiv);
+                });
+            }
+
+            // Handle all ready state (only count active participants)
             const allReadyMessage = document.getElementById('all-ready-message');
-            if (readyCount === totalParticipants && totalParticipants > 0) {
+            if (readyCount === activeCount && activeCount >= MIN_PARTICIPANTS) {
                 allReadyMessage.classList.remove('hidden');
 
                 // Update confirmation status
@@ -440,18 +550,18 @@
                 if (confirmedCount > 0) {
                     const confirmList = Object.keys(confirmed).map(name => `<div class="ready-user">→ ${name}</div>`).join('');
                     confirmStatusElement.innerHTML = `
-                                <div class="terminal-line" style="color: #66ff66;">Подтвердили переход: ${confirmedCount}/${totalParticipants}</div>
-                                ${confirmList}
-                            `;
+                            <div class="terminal-line" style="color: #66ff66;">Подтвердили переход: ${confirmedCount}/${activeCount}</div>
+                            ${confirmList}
+                        `;
 
-                    // Check if everyone confirmed
-                    if (confirmedCount === totalParticipants) {
+                    // Check if all active participants confirmed
+                    if (confirmedCount === activeCount) {
                         setTimeout(() => {
                             proceedToNextStage();
                         }, 1000);
                     }
                 } else {
-                    confirmStatusElement.innerHTML = '<div class="terminal-line" style="color: #ffaa66;">Ожидаем подтверждения от всех участников</div>';
+                    confirmStatusElement.innerHTML = '<div class="terminal-line" style="color: #ffaa66;">Ожидаем подтверждения от всех активных участников</div>';
                 }
 
                 // Update proceed button
@@ -505,9 +615,13 @@
         }
 
         function cleanup() {
-            if (unsubscribe) {
-                unsubscribe();
-                unsubscribe = null;
+            if (unsubscribeInit) {
+                unsubscribeInit();
+                unsubscribeInit = null;
+            }
+            if (unsubscribeQuest) {
+                unsubscribeQuest();
+                unsubscribeQuest = null;
             }
         }
 

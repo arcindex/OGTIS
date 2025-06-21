@@ -99,11 +99,13 @@
     <div id="waiting-section" class="section">
         <div class="terminal-line">Ты пока здесь один, <span id="waiting-nickname"></span>...</div>
         <div class="terminal-line">Ожидаем других участников<span class="blinking"></span></div>
+        <div class="terminal-line">Участников: <strong><span id="participant-count">1</span></strong> / <strong>3</strong> (минимум)</div>
     </div>
 
     <div id="recognition-section" class="section hidden">
         <div class="terminal-line"><span id="recognition-nickname"></span>, смотри, кто-то ещё зашёл:</div>
         <div id="user-list" class="user-list"></div>
+        <div class="terminal-line">Всего участников: <strong><span id="total-participants">0</span></strong></div>
         <div id="question">
             <div class="question-container fade-in">
                 <div class="terminal-line">Ты узнаёшь их?</div>
@@ -133,7 +135,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-app.js";
-        import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, set, get, onDisconnect, serverTimestamp, update } from "https://www.gstatic.com/firebasejs/11.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA5MNPm3OX_041RI5HV_Cit63KEhGwEltc",
@@ -150,6 +152,7 @@
         let app, db, nickname;
         let hasAnswered = false;
         let unsubscribe = null;
+        let currentUsers = {};
 
         async function initialize() {
             try {
@@ -169,6 +172,7 @@
                 document.getElementById('recognition-nickname').textContent = nickname;
 
                 await joinSession();
+                await initializeQuestParticipants();
                 setupListener();
 
             } catch (error) {
@@ -182,7 +186,8 @@
             await set(userRef, {
                 nickname: nickname,
                 stage: 'recognition',
-                lastSeen: serverTimestamp()
+                lastSeen: serverTimestamp(),
+                joinedAt: serverTimestamp()
             });
 
             // Auto-remove on disconnect
@@ -190,14 +195,57 @@
             await disconnectRef.remove();
         }
 
+        async function initializeQuestParticipants() {
+            // Always maintain quest_participants list for session continuity
+            try {
+                const questRef = ref(db, 'session/quest_participants');
+                const questSnapshot = await get(questRef);
+
+                // Get current active users
+                const usersRef = ref(db, 'session/users');
+                const usersSnapshot = await get(usersRef);
+
+                if (usersSnapshot.exists()) {
+                    const activeUsers = usersSnapshot.val();
+                    const questParticipants = {};
+
+                    // If quest_participants exists, merge with current users
+                    let existingQuest = {};
+                    if (questSnapshot.exists()) {
+                        existingQuest = questSnapshot.val();
+                    }
+
+                    // Add all active users to quest participants
+                    Object.keys(activeUsers).forEach(name => {
+                        questParticipants[name] = existingQuest[name] || {
+                            nickname: name,
+                            joinedAt: serverTimestamp(),
+                            stage: 'recognition',
+                            lastSeen: serverTimestamp()
+                        };
+                    });
+
+                    // Update quest participants
+                    await set(questRef, questParticipants);
+                }
+            } catch (error) {
+                console.error('Failed to initialize quest participants:', error);
+            }
+        }
+
         function setupListener() {
             const usersRef = ref(db, 'session/users');
-            unsubscribe = onValue(usersRef, (snapshot) => {
+            unsubscribe = onValue(usersRef, async (snapshot) => {
                 if (snapshot.exists()) {
-                    const users = snapshot.val();
-                    const otherUsers = Object.keys(users).filter(name => name !== nickname);
+                    currentUsers = snapshot.val();
+                    const otherUsers = Object.keys(currentUsers).filter(name => name !== nickname);
+
+                    // Update quest participants whenever users change
+                    await updateQuestParticipants();
+
                     updateDisplay(otherUsers);
                 } else {
+                    currentUsers = {};
                     updateDisplay([]);
                 }
             }, (error) => {
@@ -206,8 +254,32 @@
             });
         }
 
+        async function updateQuestParticipants() {
+            try {
+                const questRef = ref(db, 'session/quest_participants');
+                const updates = {};
+
+                Object.keys(currentUsers).forEach(name => {
+                    updates[name] = {
+                        nickname: name,
+                        stage: currentUsers[name].stage || 'recognition',
+                        lastSeen: serverTimestamp(),
+                        joinedAt: currentUsers[name].joinedAt || serverTimestamp()
+                    };
+                });
+
+                await update(questRef, updates);
+            } catch (error) {
+                console.error('Failed to update quest participants:', error);
+            }
+        }
+
         function updateDisplay(otherUsers) {
             const totalCount = otherUsers.length + 1;
+
+            // Update participant counts
+            document.getElementById('participant-count').textContent = totalCount;
+            document.getElementById('total-participants').textContent = totalCount;
 
             if (totalCount < MIN_PARTICIPANTS) {
                 showSection('waiting-section');
@@ -265,30 +337,28 @@
             btn.disabled = true;
             btn.textContent = 'Переход...';
 
-            // CRITICAL: Establish quest participants list for subsequent stages
             try {
-                const usersRef = ref(db, 'session/users');
-                const snapshot = await get(usersRef);
-                if (snapshot.exists()) {
-                    const currentUsers = snapshot.val();
-                    const questParticipantsRef = ref(db, 'session/quest_participants');
-                    const questParticipants = {};
+                // Ensure quest participants are current
+                await updateQuestParticipants();
 
-                    Object.keys(currentUsers).forEach(name => {
-                        questParticipants[name] = {
-                            nickname: name,
-                            joinedAt: serverTimestamp(),
-                            stage: 'recognition'
-                        };
-                    });
+                // Update this user's stage to indicate they're moving to initialization
+                const userRef = ref(db, `session/users/${nickname}`);
+                await update(userRef, {
+                    stage: 'moving_to_initialization',
+                    lastSeen: serverTimestamp()
+                });
 
-                    await set(questParticipantsRef, questParticipants);
-                }
+                // Small delay to ensure database is updated
+                setTimeout(() => {
+                    window.location.href = `initialization.html?nickname=${encodeURIComponent(nickname)}`;
+                }, 500);
+
             } catch (error) {
-                console.error('Failed to establish quest participants:', error);
+                console.error('Failed to proceed to start:', error);
+                btn.disabled = false;
+                btn.textContent = 'Перейти к подготовке';
+                showError('Не удалось перейти к следующему этапу');
             }
-
-            window.location.href = `initialization.html?nickname=${encodeURIComponent(nickname)}`;
         }
 
         async function reconnect() {
